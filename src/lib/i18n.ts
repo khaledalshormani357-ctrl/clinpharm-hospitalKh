@@ -1,0 +1,217 @@
+export const translations = {
+  ar: {
+    appName: 'ClinPharm Hospital',
+    systemTitle: 'Clinical Pharmacy & CDSS Platform',
+    hospitalName: 'مستشفى الشفاء التخصصي • Clinical Pharmacy Dept',
+    dutyPharmacist: 'د. خالد الشورماني (Board-Certified Clinical Pharmacist - BCPS)',
+    shift: 'Shift: الصباحية (ICU / CCU & Inpatient Wards)',
+
+    // Navigation tabs (Medical Mix: Arabic syntax + English medical terms)
+    tabs: {
+      patients: 'الأجنحة (Inpatient Rounds)',
+      reconciliation: 'مطابقة الأدوية (MedRec)',
+      calculators: 'حاسبات PK & Clinical',
+      alerts: 'فحص Safety & DDI',
+      interventions: 'التدخلات (DRP & SOAP)',
+      guidelines: 'المكتبة والمحاكاة (Library & Sim)',
+      training: 'حالات Clinical Cases',
+      copilot: 'المساعد السريري (AI Copilot)',
+    },
+
+    // Short labels for Android Bottom Navigation Bar
+    mobileNav: {
+      patients: 'Rounds',
+      guidelines: 'Library/Sim',
+      calculators: 'PK Calc',
+      interventions: 'DRP & SOAP',
+      alerts: 'Safety/DDI',
+      reconciliation: 'MedRec',
+      training: 'Cases',
+      more: 'MedRec/Cases',
+    },
+
+    // Wards
+    wards: {
+      all: 'كل الأجنحة (All Wards)',
+      ICU: 'العناية المركزة (ICU)',
+      CCU: 'عناية القلب (CCU)',
+      InternalMedicine: 'الباطنية (Internal Med)',
+      Surgery: 'الجراحة (Surgery)',
+      Oncology: 'الأورام (Oncology)',
+      Pediatrics: 'الأطفال (Pediatrics)',
+      Nephrology: 'الكلى (Nephrology)',
+    },
+
+    // Statuses
+    status: {
+      critical: 'Critical (حرج)',
+      stable: 'Stable (مستقر)',
+      improving: 'Improving (في تحسن)',
+      discharge_planned: 'Discharge Planned',
+      pending: 'Pending Review',
+      accepted: 'Accepted (مقبول)',
+      modified: 'Modified (معدل)',
+      rejected: 'Rejected (مرفوض)',
+    },
+
+    // Patient card / details
+    patient: {
+      mrn: 'رقم الملف (MRN)',
+      name: 'اسم المريض (Patient)',
+      age: 'Age (العمر)',
+      gender: 'Sex (الجنس)',
+      male: 'Male (ذكر)',
+      female: 'Female (أنثى)',
+      weight: 'Weight (kg)',
+      height: 'Height (cm)',
+      bmi: 'BMI',
+      ibw: 'Ideal Body Weight (IBW)',
+      scr: 'Serum Creatinine (SCr)',
+      crcl: 'Creatinine Clearance (CrCl)',
+      allergies: 'Drug Allergies',
+      diagnoses: 'Clinical Diagnoses',
+      attendingPhysician: 'Attending Physician',
+      activeMeds: 'أوامر التنويم النشطة (Active MAR)',
+      homeMeds: 'أدوية ما قبل التنويم (Home Meds)',
+      addNewPatient: 'إدخال مريض (New Admission)',
+      viewFile: 'فتح الـ Patient Chart',
+      runSafetyCheck: 'فحص Drug Safety',
+      addIntervention: 'تسجيل DRP Intervention',
+    },
+
+    // Calculators
+    calc: {
+      crclTitle: 'Cockcroft-Gault CrCl & Renal Dosing',
+      crclDesc: 'حساب CrCl و IBW/AdjBW لتعديل الـ Renal Dosing',
+      vancoTitle: 'Vancomycin TDM & AUC₂₄/MIC',
+      vancoDesc: 'حساب Loading/Maintenance Dose والـ AUC₂₄/MIC Target',
+      childPughTitle: 'Child-Pugh Hepatic Score',
+      childPughDesc: 'تصنيف Cirrhosis (Class A/B/C) لتعديل الـ Hepatic Clearance',
+      cha2ds2Title: 'CHA₂DS₂-VASc Stroke Score',
+      cha2ds2Desc: 'تقييم خطر الـ Thromboembolism في مرضى Non-Valvular AFib',
+      hasBledTitle: 'HAS-BLED Bleeding Score',
+      hasBledDesc: 'تقييم خطر الـ Major Bleeding مع الـ Anticoagulants',
+      opioidTitle: 'Opioid Equianalgesic Converter',
+      opioidDesc: 'تحويل الـ Equianalgesic Doses مع خصم الـ Cross-Tolerance',
+      calculate: 'احسب (Calculate)',
+      result: 'Clinical Result & Dosing Recommendation',
+    },
+
+    // Actions
+    actions: {
+      search: 'بحث بـ MRN أو اسم المريض أو Drug Name...',
+      filter: 'Filter',
+      exportReport: 'تصدير Clinical Report',
+      print: 'Print',
+      save: 'حفظ (Save)',
+      cancel: 'إلغاء',
+      close: 'إغلاق',
+      refresh: 'Refresh',
+      syncStatus: 'Online • Synced',
+    }
+  },
+  en: {
+    appName: 'ClinPharm Hospital',
+    systemTitle: 'Comprehensive Clinical Pharmacy System',
+    hospitalName: 'Al-Shifa Specialized Hospital - Medical Admin',
+    dutyPharmacist: 'Dr. Khaled Al-Shormani (Board-Certified Clinical Pharmacist)',
+    shift: 'Shift: Morning (Critical Care & Inpatient Wards)',
+
+    tabs: {
+      patients: 'Patients & Rounds',
+      reconciliation: 'Med Reconciliation',
+      calculators: 'Clinical Calculators',
+      alerts: 'Safety & Interactions',
+      interventions: 'Interventions (DRP)',
+      guidelines: 'Medical Library & Simulator',
+      training: 'Clinical Cases & Training',
+      copilot: 'AI Copilot Assistant',
+    },
+
+    mobileNav: {
+      patients: 'Rounds',
+      guidelines: 'Library/Sim',
+      calculators: 'PK Calc',
+      interventions: 'DRP & SOAP',
+      alerts: 'Safety/DDI',
+      reconciliation: 'MedRec',
+      training: 'Cases',
+      more: 'MedRec/Cases',
+    },
+
+    wards: {
+      all: 'All Wards',
+      ICU: 'Intensive Care (ICU)',
+      CCU: 'Cardiac Care (CCU)',
+      InternalMedicine: 'Internal Medicine',
+      Surgery: 'General Surgery',
+      Oncology: 'Oncology Ward',
+      Pediatrics: 'Pediatrics',
+      Nephrology: 'Nephrology',
+    },
+
+    status: {
+      critical: 'Critical',
+      stable: 'Stable',
+      improving: 'Improving',
+      discharge_planned: 'Discharge Planned',
+      pending: 'Pending Review',
+      accepted: 'Accepted by Physician',
+      modified: 'Modified by Consensus',
+      rejected: 'Rejected',
+    },
+
+    patient: {
+      mrn: 'Medical Record # (MRN)',
+      name: 'Patient Name',
+      age: 'Age',
+      gender: 'Gender',
+      male: 'Male',
+      female: 'Female',
+      weight: 'Weight',
+      height: 'Height',
+      bmi: 'BMI',
+      ibw: 'Ideal Weight (IBW)',
+      scr: 'Serum Creatinine',
+      crcl: 'Creatinine Clearance (CrCl)',
+      allergies: 'Documented Allergies',
+      diagnoses: 'Clinical Diagnoses',
+      attendingPhysician: 'Attending Physician',
+      activeMeds: 'Active Inpatient Medications',
+      homeMeds: 'Pre-Admission Home Meds',
+      addNewPatient: 'Admit New Patient',
+      viewFile: 'View Clinical File',
+      runSafetyCheck: 'Analyze Drug Safety',
+      addIntervention: 'Record Pharmacist Intervention',
+    },
+
+    calc: {
+      crclTitle: 'Creatinine Clearance (Cockcroft-Gault)',
+      crclDesc: 'Accurate dosing adjustments for renally eliminated drugs',
+      vancoTitle: 'Vancomycin Dosing & AUC/MIC',
+      vancoDesc: 'Therapeutic Drug Monitoring (TDM) target levels & AUC',
+      childPughTitle: 'Child-Pugh Hepatic Score',
+      childPughDesc: 'Assess hepatic impairment for hepatically cleared drugs',
+      cha2ds2Title: 'CHA₂DS₂-VASc Stroke Risk',
+      cha2ds2Desc: 'Risk stratification for stroke in non-valvular AFib',
+      hasBledTitle: 'HAS-BLED Bleeding Risk',
+      hasBledDesc: 'Bleeding risk score on anticoagulation therapy',
+      opioidTitle: 'Opioid Equianalgesic Converter',
+      opioidDesc: 'Conversion between Morphine, Fentanyl, Oxycodone, etc.',
+      calculate: 'Calculate',
+      result: 'Clinical Result & Recommendation',
+    },
+
+    actions: {
+      search: 'Search by MRN, patient name or medication...',
+      filter: 'Filter',
+      exportReport: 'Export Clinical Report',
+      print: 'Print Report',
+      save: 'Save',
+      cancel: 'Cancel',
+      close: 'Close',
+      refresh: 'Refresh Data',
+      syncStatus: 'Online - Synchronized',
+    }
+  }
+};
