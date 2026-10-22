@@ -16,24 +16,29 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js 22
+      - name: Setup Node.js 24
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
 
       - name: Setup Java JDK 21 for Android Gradle
         uses: actions/setup-java@v4
         with:
           distribution: "temurin"
           java-version: "21"
-          cache: "gradle"
 
-      - name: Setup Android SDK & Accept Licenses
-        uses: android-actions/setup-android@v3
-
-      - name: Accept Android SDK Licenses
+      - name: Configure Android SDK & Accept All Licenses
         run: |
-          yes | sdkmanager --licenses || true
+          export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+          mkdir -p "$ANDROID_HOME/licenses"
+          printf "\n8933bad161af4178b1185d1a37fbf41ea5269c55\nd56f5187479451eabf01fb78af6dfcb131a6481e\n24333f8a63b6825ea9c5514f83c2829b004d1fee\n" > "$ANDROID_HOME/licenses/android-sdk-license"
+          printf "\n84831b9409646a918e30573bab4c9c91346d8abd\n504667f4c0de7af1a06de9f4b1727b84351f2910\n" > "$ANDROID_HOME/licenses/android-sdk-preview-license"
+          if [ -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
+            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
+          fi
 
       - name: Install dependencies
         run: npm install --legacy-peer-deps
@@ -44,8 +49,11 @@ jobs:
           VITE_GEMINI_API_KEY: ${{ secrets.VITE_GEMINI_API_KEY }}
         run: npm run build
 
-      - name: Sync Capacitor Android Project & Plugins
-        run: npx cap sync android
+      - name: Generate Fresh Capacitor Android Project & Sync Assets
+        run: |
+          rm -rf android
+          npx cap add android
+          npx cap sync android
 
       - name: Build Android APK via Gradle
         working-directory: ./android
@@ -64,17 +72,13 @@ jobs:
           path: ClinPharm-Hospital-Android.apk
 
       - name: Publish APK to GitHub Releases
-        uses: softprops/action-gh-release@v2
-        if: github.ref_name == 'main' || github.ref_name == 'master' || startsWith(github.ref, 'refs/tags/')
-        with:
-          tag_name: v2.6.0-latest
-          target_commitish: ${{ github.sha }}
-          name: "ClinPharm Hospital CDSS — Official Android APK & Offline Library Release"
-          body: |
-            ## ClinPharm Hospital | نظام الصيدلة السريرية المتكامل (الإصدار الرسمي للتجربة والتنزيل)
-            - **تطبيق الأندرويد المباشر (`.APK`)**: قم بتنزيل ملف `ClinPharm-Hospital-Android.apk` أدناه وتثبيته مباشرة على هاتفك.
-            - **المكتبة المرجعية الكاملة**: يضم 6 مراجع معتمدة (44 فصلاً مدمجاً + ربط Google Drive لاستيراد وفهرسة 100% من صفحات ملفات الـ PDF).
-            - **المساعد الذكي الحقيقي**: مدعوم بنموذج Google Gemini 3.8 Flash.
-          files: ClinPharm-Hospital-Android.apk
-          prerelease: false
-        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view v2.6.0-latest >/dev/null 2>&1; then
+            gh release upload v2.6.0-latest ClinPharm-Hospital-Android.apk --clobber || true
+          else
+            gh release create v2.6.0-latest ClinPharm-Hospital-Android.apk \
+              --title "ClinPharm Hospital CDSS — Official Android APK & Offline Library Release" \
+              --notes "ClinPharm Hospital Android APK (ClinPharm-Hospital-Android.apk) with full 6-book clinical library, Google Drive PDF sync, and Gemini 3.8 Flash Copilot." || true
+          fi

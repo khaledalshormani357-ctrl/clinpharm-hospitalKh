@@ -21,10 +21,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js 22
+      - name: Setup Node.js 24
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
 
       - name: Install dependencies
         run: npm install --legacy-peer-deps
@@ -50,24 +50,10 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./dist
           force_orphan: true
-        continue-on-error: true
 
-      - name: Configure GitHub Pages (Actions Mode)
-        id: pages_config
-        uses: actions/configure-pages@v5
-        with:
-          enablement: true
-        continue-on-error: true
-
-      - name: Upload Pages Artifact
-        if: steps.pages_config.outcome == 'success'
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: "./dist"
-        continue-on-error: true
-
-      - name: Deploy to GitHub Pages
-        if: steps.pages_config.outcome == 'success'
-        id: deployment
-        uses: actions/deploy-pages@v4
-        continue-on-error: true
+      - name: Enable GitHub Pages on gh-pages Branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api -X POST "repos/${GITHUB_REPOSITORY}/pages" -f "source[branch]=gh-pages" -f "source[path]=/" >/dev/null 2>&1 || \
+          gh api -X PUT "repos/${GITHUB_REPOSITORY}/pages" -f "source[branch]=gh-pages" -f "source[path]=/" >/dev/null 2>&1 || true
