@@ -1,0 +1,76 @@
+name: Build Android APK & Publish GitHub Release
+
+on:
+  push:
+    branches: ["main", "master"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Setup Java JDK 21 for Android Gradle
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "21"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build Web Application Bundle
+        env:
+          GITHUB_PAGES: "true"
+          VITE_GEMINI_API_KEY: ${{ secrets.VITE_GEMINI_API_KEY }}
+        run: npm run build
+
+      - name: Sync Web Bundle into Android Assets
+        run: |
+          mkdir -p android/app/src/main/assets/public
+          cp -r dist/* android/app/src/main/assets/public/
+
+      - name: Build Android APK via Gradle
+        working-directory: ./android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Rename APK for Release
+        run: |
+          cp android/app/build/outputs/apk/debug/app-debug.apk ClinPharm-Hospital-Android.apk
+
+      - name: Upload Android APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClinPharm-Hospital-Android-APK
+          path: ClinPharm-Hospital-Android.apk
+
+      - name: Publish APK to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        if: github.ref_name == 'main' || github.ref_name == 'master' || startsWith(github.ref, 'refs/tags/')
+        with:
+          tag_name: v2.6.0-latest
+          name: "ClinPharm Hospital CDSS — Official Android APK & Offline Library Release"
+          body: |
+            ## ClinPharm Hospital | نظام الصيدلة السريرية المتكامل (الإصدار الرسمي للتجربة والتنزيل)
+            - **تطبيق الأندرويد المباشر (`.APK`)**: قم بتنزيل ملف `ClinPharm-Hospital-Android.apk` أدناه وتثبيته مباشرة على هاتفك.
+            - **المكتبة المرجعية الكاملة**: يضم 6 مراجع معتمدة (44 فصلاً مدمجاً + ربط Google Drive لاستيراد وفهرسة 100% من صفحات ملفات الـ PDF).
+            - **المساعد الذكي الحقيقي**: مدعوم بنموذج Google Gemini 3.8 Flash.
+          files: ClinPharm-Hospital-Android.apk
+          prerelease: false

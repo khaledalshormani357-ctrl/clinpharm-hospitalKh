@@ -103,10 +103,20 @@ Ask any patient-specific pharmacotherapy, dosing, or pharmacokinetic question fo
       fetch('/api/copilot/health')
         .then(r => r.json())
         .then(data => {
-          setLiveAiStatus(data?.liveAiReady ? 'connected' : 'error');
+          if (data?.liveAiReady) {
+            setLiveAiStatus('connected');
+          } else if (import.meta.env.VITE_GEMINI_API_KEY) {
+            setLiveAiStatus('connected');
+          } else {
+            setLiveAiStatus('error');
+          }
         })
         .catch(() => {
-          setLiveAiStatus('error');
+          if (import.meta.env.VITE_GEMINI_API_KEY) {
+            setLiveAiStatus('connected');
+          } else {
+            setLiveAiStatus('error');
+          }
         });
     }
   }, [isOpen]);
@@ -176,27 +186,54 @@ Home Medications: ${currentPatient.homeMedications.map(m => `${m.genericName} ${
 Simulated Case Engine Summary: ${patientSim?.readySoapPlanEn || ''}`
         : 'No specific inpatient selected.';
 
-      const response = await fetch('/api/copilot/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          query: currentInput,
-          lang,
-          history: historyForApi,
-          patientContext,
-          referenceContext: contextPrompt,
-          verbatimLibraryContext
-        })
-      });
+      let replyText = '';
+      try {
+        const response = await fetch('/api/copilot/chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            query: currentInput,
+            lang,
+            history: historyForApi,
+            patientContext,
+            referenceContext: contextPrompt,
+            verbatimLibraryContext
+          })
+        });
 
-      const data = await response.json();
-
-      if (!response.ok || !data?.text) {
-        throw new Error(data?.error || `HTTP ${response.status}`);
+        const data = await response.json();
+        if (!response.ok || !data?.text) {
+          throw new Error(data?.error || `HTTP ${response.status}`);
+        }
+        replyText = data.text;
+      } catch (serverErr) {
+        // Fallback for static GitHub Pages / Android APK build when VITE_GEMINI_API_KEY is present
+        const clientApiKey = import.meta.env.VITE_GEMINI_API_KEY;
+        if (!clientApiKey) {
+          throw serverErr;
+        }
+        const { GoogleGenAI } = await import('@google/genai');
+        const ai = new GoogleGenAI({ apiKey: clientApiKey });
+        const aiRes = await ai.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: `Active Patient Context:\n${patientContext}\n\nMatched Verbatim Reference Excerpts:\n${verbatimLibraryContext}\n\n${contextPrompt}\n\nUser Clinical Question:\n${currentInput}`,
+          config: {
+            systemInstruction:
+              lang === 'ar'
+                ? 'أنت مساعد صيدلة سريرية (BCPS/BCCP) خبير. أجب بدقة علمية بالاعتماد على المراجع المرفقة وملف المريض النشط.'
+                : 'You are an expert board-certified clinical pharmacy copilot (BCPS/BCCP). Provide evidence-based guidance grounded in the verbatim library excerpts and active patient chart.',
+            temperature: 0.2
+          }
+        });
+        replyText = aiRes.text || '';
+        if (!replyText) {
+          throw serverErr;
+        }
       }
 
+      const data = { text: replyText };
       setLiveAiStatus('connected');
 
       const verbatimCitations = verbatimMatches.map(m => ({

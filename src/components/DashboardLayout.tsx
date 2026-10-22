@@ -24,7 +24,8 @@ import {
   GitBranch,
   Table,
   CheckCircle2,
-  X
+  X,
+  Download
 } from 'lucide-react';
 import { ReconciliationPanel } from './workspace/ReconciliationPanel';
 import { CalculatorsPanel } from './workspace/CalculatorsPanel';
@@ -35,6 +36,7 @@ import { TrainingPanel } from './workspace/TrainingPanel';
 import { CopilotDialog } from './CopilotDialog';
 import { PatientDetailsModal } from './PatientDetailsModal';
 import { NewPatientModal } from './NewPatientModal';
+import { GitHubReleaseModal } from './GitHubReleaseModal';
 import { calculateCrCl, analyzePatientSafety } from '../lib/clinical-engine';
 import { resolveLocalReference, exportLocalReferenceMarkdown } from '../lib/clinicalReferences';
 import { syncQueue } from '../lib/supabase/syncQueue';
@@ -76,6 +78,7 @@ export function DashboardLayout({
   const [copilotPrompt, setCopilotPrompt] = useState<string | null>(null);
   const [isNewPatientOpen, setIsNewPatientOpen] = useState(false);
   const [isSyncAuditOpen, setIsSyncAuditOpen] = useState(false);
+  const [isGitHubReleaseOpen, setIsGitHubReleaseOpen] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const [auditNotice, setAuditNotice] = useState<string | null>(null);
   const [activeLocalRefUri, setActiveLocalRefUri] = useState<string | null>(null);
@@ -164,6 +167,17 @@ export function DashboardLayout({
 
             {/* Right: Touch-Friendly Action Controls (Minimum 40x40px targets) */}
             <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+              <button
+                onClick={() => setIsGitHubReleaseOpen(true)}
+                title={lang === 'ar' ? 'تثبيت التطبيق وإصدار GitHub' : 'Install App & GitHub Release'}
+                className="flex items-center justify-center gap-1.5 min-h-[40px] px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 text-teal-300 border border-slate-700 text-xs font-bold transition cursor-pointer"
+              >
+                <Download className="w-4 h-4 text-teal-400 shrink-0" />
+                <span className="hidden md:inline">
+                  {lang === 'ar' ? 'تثبيت التطبيق / GitHub' : 'Install / GitHub'}
+                </span>
+              </button>
+
               <button
                 onClick={() => setIsSyncAuditOpen(true)}
                 title={lang === 'ar' ? 'Offline Sync Queue' : 'Sync Queue'}
@@ -1327,6 +1341,16 @@ export function DashboardLayout({
           </div>
         </div>
       )}
+
+      {/* GitHub Release & Direct App Installation Modal */}
+      <GitHubReleaseModal
+        isOpen={isGitHubReleaseOpen}
+        onClose={() => setIsGitHubReleaseOpen(false)}
+        lang={lang}
+        patients={patients}
+        interventions={interventions}
+        discrepancies={discrepancies}
+      />
     </div>
   );
 }
