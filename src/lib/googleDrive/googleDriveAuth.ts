@@ -6,7 +6,25 @@ import {
   onAuthStateChanged,
   User
 } from 'firebase/auth';
-import firebaseConfig from '../../../firebase-applet-config.json';
+
+const configModules = import.meta.glob('../../../firebase-applet-config.json', {
+  eager: true,
+  import: 'default'
+}) as Record<string, Record<string, string>>;
+
+const loadedConfig = Object.values(configModules)[0];
+
+const firebaseConfig = loadedConfig || {
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || 'gen-lang-client-0487905478',
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || '1:983876723590:web:87edaab54688a9d9074207',
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyAbvKSlhbh4LvX-qIg0_YrDMUHhxm4eMRo',
+  authDomain:
+    import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'gen-lang-client-0487905478.firebaseapp.com',
+  storageBucket:
+    import.meta.env.VITE_FIREBASE_STORAGE_BUCKET ||
+    'gen-lang-client-0487905478.firebasestorage.app',
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '983876723590'
+};
 
 export const SCOPES = [
   'https://www.googleapis.com/auth/drive',

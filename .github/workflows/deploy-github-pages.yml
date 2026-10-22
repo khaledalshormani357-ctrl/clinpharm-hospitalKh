@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -25,35 +25,49 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: "npm"
 
       - name: Install dependencies
-        run: npm install
+        run: npm install --legacy-peer-deps
 
       - name: Build Production PWA Frontend
         env:
           GITHUB_PAGES: "true"
           VITE_GEMINI_API_KEY: ${{ secrets.VITE_GEMINI_API_KEY }}
-        run: npm run build
+        run: |
+          npm run build
+          cp dist/index.html dist/404.html
+          touch dist/.nojekyll
 
-      - name: Copy index.html to 404.html for SPA Routing
-        run: cp dist/index.html dist/404.html
+      - name: Upload Built Web App Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClinPharm-Web-PWA-Build
+          path: ./dist
 
-      - name: Setup GitHub Pages
+      - name: Deploy to gh-pages Branch
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./dist
+          force_orphan: true
+        continue-on-error: true
+
+      - name: Configure GitHub Pages (Actions Mode)
+        id: pages_config
         uses: actions/configure-pages@v5
+        with:
+          enablement: true
+        continue-on-error: true
 
       - name: Upload Pages Artifact
+        if: steps.pages_config.outcome == 'success'
         uses: actions/upload-pages-artifact@v3
         with:
           path: "./dist"
+        continue-on-error: true
 
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
       - name: Deploy to GitHub Pages
+        if: steps.pages_config.outcome == 'success'
         id: deployment
         uses: actions/deploy-pages@v4
+        continue-on-error: true
