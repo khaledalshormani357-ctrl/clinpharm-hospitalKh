@@ -1,14 +1,25 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
-export default defineConfig(() => {
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), '');
   const isGitHubPages = process.env.GITHUB_PAGES === 'true';
+  const resolvedGeminiKey =
+    process.env.VITE_GEMINI_API_KEY ||
+    process.env.GEMINI_API_KEY ||
+    env.VITE_GEMINI_API_KEY ||
+    env.GEMINI_API_KEY ||
+    '';
 
   return {
     base: isGitHubPages ? './' : '/',
+    define: {
+      'process.env.GEMINI_API_KEY': JSON.stringify(resolvedGeminiKey),
+      'import.meta.env.VITE_GEMINI_API_KEY': JSON.stringify(resolvedGeminiKey)
+    },
     plugins: [
       react(),
       tailwindcss(),
@@ -16,7 +27,7 @@ export default defineConfig(() => {
         registerType: 'autoUpdate',
         includeAssets: ['icon.svg', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png'],
         manifest: {
-          id: '/',
+          id: './',
           name: 'ClinPharm Hospital | نظام الصيدلة السريرية المتكامل',
           short_name: 'ClinPharm',
           description:
@@ -50,6 +61,8 @@ export default defineConfig(() => {
         workbox: {
           maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
+          navigateFallback: 'index.html',
+          navigateFallbackDenylist: [/^\/api\//, /^\/__\//],
           runtimeCaching: [
             {
               urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
@@ -82,8 +95,7 @@ export default defineConfig(() => {
           ]
         },
         devOptions: {
-          enabled: true,
-          type: 'module'
+          enabled: false
         }
       })
     ],
@@ -101,4 +113,3 @@ export default defineConfig(() => {
     }
   };
 });
-

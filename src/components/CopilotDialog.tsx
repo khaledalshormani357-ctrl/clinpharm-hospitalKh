@@ -99,26 +99,42 @@ Ask any patient-specific pharmacotherapy, dosing, or pharmacokinetic question fo
   }, [messages]);
 
   useEffect(() => {
-    if (isOpen) {
-      fetch('/api/copilot/health')
-        .then(r => r.json())
-        .then(data => {
+    if (!isOpen) return;
+
+    let cancelled = false;
+    const checkAiAvailability = async () => {
+      const endpoints = [
+        '/api/copilot/health',
+        'https://ais-pre-sr6y5mqqoromsgvakmmu26-177021215798.europe-west2.run.app/api/copilot/health',
+        'https://ais-dev-sr6y5mqqoromsgvakmmu26-177021215798.europe-west2.run.app/api/copilot/health'
+      ];
+
+      for (const url of endpoints) {
+        try {
+          const res = await fetch(url);
+          const ct = res.headers.get('content-type') || '';
+          if (!res.ok || !ct.includes('application/json')) continue;
+          const data = await res.json();
           if (data?.liveAiReady) {
-            setLiveAiStatus('connected');
-          } else if (import.meta.env.VITE_GEMINI_API_KEY) {
-            setLiveAiStatus('connected');
-          } else {
-            setLiveAiStatus('error');
+            if (!cancelled) setLiveAiStatus('connected');
+            return;
           }
-        })
-        .catch(() => {
-          if (import.meta.env.VITE_GEMINI_API_KEY) {
-            setLiveAiStatus('connected');
-          } else {
-            setLiveAiStatus('error');
-          }
-        });
-    }
+        } catch {
+          // Try next endpoint
+        }
+      }
+
+      if (import.meta.env.VITE_GEMINI_API_KEY) {
+        if (!cancelled) setLiveAiStatus('connected');
+      } else {
+        if (!cancelled) setLiveAiStatus('error');
+      }
+    };
+
+    void checkAiAvailability();
+    return () => {
+      cancelled = true;
+    };
   }, [isOpen]);
 
   useEffect(() => {
@@ -186,50 +202,96 @@ Home Medications: ${currentPatient.homeMedications.map(m => `${m.genericName} ${
 Simulated Case Engine Summary: ${patientSim?.readySoapPlanEn || ''}`
         : 'No specific inpatient selected.';
 
-      let replyText = '';
-      try {
-        const response = await fetch('/api/copilot/chat', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            query: currentInput,
-            lang,
-            history: historyForApi,
-            patientContext,
-            referenceContext: contextPrompt,
-            verbatimLibraryContext
-          })
-        });
+      const requestPayload = {
+        query: currentInput,
+        lang,
+        history: historyForApi,
+        patientContext,
+        referenceContext: contextPrompt,
+        verbatimLibraryContext
+      };
 
-        const data = await response.json();
-        if (!response.ok || !data?.text) {
-          throw new Error(data?.error || `HTTP ${response.status}`);
+      const candidateEndpoints = [
+        '/api/copilot/chat',
+        'https://ais-pre-sr6y5mqqoromsgvakmmu26-177021215798.europe-west2.run.app/api/copilot/chat',
+        'https://ais-dev-sr6y5mqqoromsgvakmmu26-177021215798.europe-west2.run.app/api/copilot/chat'
+      ];
+
+      let replyText = '';
+      let lastError = '';
+
+      for (const endpoint of candidateEndpoints) {
+        try {
+          const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(requestPayload)
+          });
+
+          const contentType = response.headers.get('content-type') || '';
+          if (!contentType.includes('application/json')) {
+            // Static host (e.g. GitHub Pages 404.html) returned HTML instead of JSON; skip to next endpoint
+            continue;
+          }
+
+          const data = await response.json();
+          if (response.ok && data?.text) {
+            replyText = data.text;
+            break;
+          }
+          lastError = data?.error || `HTTP ${response.status}`;
+        } catch (err) {
+          lastError = err instanceof Error ? err.message : 'Network error';
         }
-        replyText = data.text;
-      } catch (serverErr) {
-        // Fallback for static GitHub Pages / Android APK build when VITE_GEMINI_API_KEY is present
+      }
+
+      // Direct @google/genai SDK execution when running on static GitHub Pages / Android APK
+      if (!replyText) {
         const clientApiKey = import.meta.env.VITE_GEMINI_API_KEY;
         if (!clientApiKey) {
-          throw serverErr;
+          throw new Error(
+            lastError ||
+              (lang === 'ar'
+                ? 'تعذر الوصول إلى خادم الذكاء الاصطناعي.'
+                : 'Could not reach the Gemini AI server.')
+          );
         }
+
         const { GoogleGenAI } = await import('@google/genai');
         const ai = new GoogleGenAI({ apiKey: clientApiKey });
-        const aiRes = await ai.models.generateContent({
-          model: 'gemini-3.8-flash',
-          contents: `Active Patient Context:\n${patientContext}\n\nMatched Verbatim Reference Excerpts:\n${verbatimLibraryContext}\n\n${contextPrompt}\n\nUser Clinical Question:\n${currentInput}`,
-          config: {
-            systemInstruction:
-              lang === 'ar'
-                ? 'أنت مساعد صيدلة سريرية (BCPS/BCCP) خبير. أجب بدقة علمية بالاعتماد على المراجع المرفقة وملف المريض النشط.'
-                : 'You are an expert board-certified clinical pharmacy copilot (BCPS/BCCP). Provide evidence-based guidance grounded in the verbatim library excerpts and active patient chart.',
-            temperature: 0.2
-          }
-        });
-        replyText = aiRes.text || '';
+        const sysPrompt =
+          lang === 'ar'
+            ? 'أنت "ClinPharm AI Copilot"، استشاري صيدلة سريرية وعناية مركزة معتمد (BCPS, BCCCP, BCCP). أجب بأسلوب Medical Mix (لغة عربية طبية رصينة مع إبقاء أسماء الأدوية والمختبرات والمعادلات بالإنجليزية) بالاعتماد الصارم على المراجع الحرفية المرفقة وملف المريض النشط، مع ذكر الجرعات الدقيقة وفصول المراجع.'
+            : 'You are "ClinPharm AI Copilot", a Senior Board-Certified Clinical Pharmacy Specialist (BCPS, BCCCP, BCCP). Provide deep, patient-specific, evidence-based guidance grounded in the verbatim library excerpts and active patient chart, citing exact chapters and doses.';
+
+        const fullPrompt = `1. ACTIVE INPATIENT CHART & LABS:\n${patientContext}\n\n2. MATCHED CLINICAL REFERENCE DATABASE:\n${contextPrompt}\n\n3. VERBATIM UNABRIDGED TEXTBOOK EXCERPTS:\n${verbatimLibraryContext}\n\nUser Clinical Question:\n${currentInput}`;
+
+        try {
+          const aiRes = await ai.models.generateContent({
+            model: 'gemini-3.8-flash',
+            contents: fullPrompt,
+            config: {
+              systemInstruction: sysPrompt,
+              temperature: 0.25
+            }
+          });
+          replyText = aiRes.text?.trim() || '';
+        } catch {
+          const fallbackRes = await ai.models.generateContent({
+            model: 'gemini-flash-latest',
+            contents: fullPrompt,
+            config: {
+              systemInstruction: sysPrompt,
+              temperature: 0.25
+            }
+          });
+          replyText = fallbackRes.text?.trim() || '';
+        }
+
         if (!replyText) {
-          throw serverErr;
+          throw new Error(lastError || 'Empty response from Gemini AI.');
         }
       }
 

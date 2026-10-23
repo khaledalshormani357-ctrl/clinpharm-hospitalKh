@@ -790,26 +790,135 @@ export async function parsePdfBufferToFullBookRecord(options: {
   };
 }
 
+async function fetchPublicDrivePdfViaProxy(
+  cleanDriveId: string,
+  accessToken?: string | null
+): Promise<{ pdfBytes: ArrayBuffer; fileName: string }> {
+  const proxyEndpoints = [
+    `/api/drive/fetch-pdf?fileId=${encodeURIComponent(cleanDriveId)}`,
+    `https://ais-pre-sr6y5mqqoromsgvakmmu26-177021215798.europe-west2.run.app/api/drive/fetch-pdf?fileId=${encodeURIComponent(
+      cleanDriveId
+    )}`,
+    `https://ais-dev-sr6y5mqqoromsgvakmmu26-177021215798.europe-west2.run.app/api/drive/fetch-pdf?fileId=${encodeURIComponent(
+      cleanDriveId
+    )}`
+  ];
+
+  let lastError = 'Could not download PDF from Google Drive link.';
+
+  for (const endpoint of proxyEndpoints) {
+    try {
+      const headers: Record<string, string> = {};
+      if (accessToken) {
+        headers.Authorization = `Bearer ${accessToken}`;
+      }
+      const res = await fetch(endpoint, { headers });
+      const contentType = res.headers.get('content-type') || '';
+
+      if (res.ok && contentType.includes('application/pdf')) {
+        const pdfBytes = await res.arrayBuffer();
+        const rawFilename = res.headers.get('x-drive-filename');
+        const fileName = rawFilename
+          ? decodeURIComponent(rawFilename)
+          : `${cleanDriveId}.pdf`;
+        return { pdfBytes, fileName };
+      }
+
+      if (contentType.includes('application/json')) {
+        const errJson = await res.json().catch(() => ({}));
+        if (errJson?.error) lastError = errJson.error;
+      }
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : 'Network error';
+    }
+  }
+
+  throw new Error(lastError);
+}
+
 export async function ingestDriveFileAsFullBook(options: {
-  accessToken: string;
+  accessToken?: string | null;
   driveFileId: string;
   targetBookId?: string;
   onProgress?: (progress: BookSyncProgress) => void;
 }): Promise<SyncedFullBookRecord> {
   const { accessToken, driveFileId, targetBookId, onProgress } = options;
   const cleanDriveId = extractGoogleDriveFileId(driveFileId);
+  if (!cleanDriveId) {
+    throw new Error('Please enter a valid Google Drive File ID or Share Link.');
+  }
   const resolvedBookId = targetBookId || `drive-book-${cleanDriveId}`;
+  const knownMapping = KNOWN_DRIVE_BOOK_MAPPINGS.find(m => m.bookId === resolvedBookId);
 
   onProgress?.({
     bookId: resolvedBookId,
-    fileName: cleanDriveId,
+    fileName: knownMapping?.badge || cleanDriveId,
     phase: 'connecting',
     currentPage: 0,
     totalPages: 0,
-    message: 'Fetching file metadata from Google Drive...'
+    message: 'Connecting to Google Drive to fetch PDF...'
   });
 
-  const metadata = await getDriveFileMetadata(accessToken, cleanDriveId);
+  // If no OAuth token is present, or if metadata lookup fails on a public link, use the direct proxy
+  if (!accessToken) {
+    onProgress?.({
+      bookId: resolvedBookId,
+      fileName: knownMapping?.badge || cleanDriveId,
+      phase: 'downloading',
+      currentPage: 0,
+      totalPages: 0,
+      message: `Downloading shared PDF (${knownMapping?.badge || cleanDriveId}) from Google Drive...`
+    });
+
+    const { pdfBytes, fileName } = await fetchPublicDrivePdfViaProxy(cleanDriveId, null);
+    const resolvedName = knownMapping ? `${knownMapping.badge}.pdf` : fileName;
+
+    const record = await parsePdfBufferToFullBookRecord({
+      pdfBytes,
+      bookId: resolvedBookId,
+      driveFileId: cleanDriveId,
+      fileName: resolvedName,
+      onProgress
+    });
+
+    if (!knownMapping) {
+      record.customTitle = resolvedName.replace(/\.pdf$/i, '');
+      record.customBadge = resolvedName.replace(/\.pdf$/i, '').slice(0, 26);
+    }
+
+    await saveSyncedFullBook(record, pdfBytes);
+    onProgress?.({
+      bookId: resolvedBookId,
+      fileName: resolvedName,
+      phase: 'completed',
+      currentPage: record.totalPages,
+      totalPages: record.totalPages,
+      message: `Completed! Indexed 100% of "${resolvedName}" (${record.totalPages} pages).`
+    });
+    return record;
+  }
+
+  let metadata: DriveFileItem;
+  try {
+    metadata = await getDriveFileMetadata(accessToken, cleanDriveId);
+  } catch {
+    // Fallback to proxy download if file is shared via link
+    const { pdfBytes, fileName } = await fetchPublicDrivePdfViaProxy(cleanDriveId, accessToken);
+    const resolvedName = knownMapping ? `${knownMapping.badge}.pdf` : fileName;
+    const record = await parsePdfBufferToFullBookRecord({
+      pdfBytes,
+      bookId: resolvedBookId,
+      driveFileId: cleanDriveId,
+      fileName: resolvedName,
+      onProgress
+    });
+    if (!knownMapping) {
+      record.customTitle = resolvedName.replace(/\.pdf$/i, '');
+      record.customBadge = resolvedName.replace(/\.pdf$/i, '').slice(0, 26);
+    }
+    await saveSyncedFullBook(record, pdfBytes);
+    return record;
+  }
 
   // If the Drive ID is a folder, look inside it for PDFs or Google Docs
   if (metadata.mimeType === 'application/vnd.google-apps.folder') {

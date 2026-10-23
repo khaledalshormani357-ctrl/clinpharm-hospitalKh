@@ -175,16 +175,6 @@ export function GoogleDriveBookSyncModal({
   };
 
   const handleSyncSingleBookFromDrive = async (bookId: string, driveIdOrUrl: string) => {
-    if (!token || needsAuth) {
-      setNeedsAuth(true);
-      setErrorMessage(
-        lang === 'ar'
-          ? 'يرجى تسجيل الدخول بحساب Google أولاً للوصول إلى ملفات Google Drive.'
-          : 'Please sign in with Google first to access your Google Drive files.'
-      );
-      return;
-    }
-
     setErrorMessage(null);
     setSuccessMessage(null);
     try {
@@ -213,10 +203,6 @@ export function GoogleDriveBookSyncModal({
   };
 
   const handleSyncAllMappedBooks = async () => {
-    if (!token || needsAuth) {
-      setNeedsAuth(true);
-      return;
-    }
     setErrorMessage(null);
     setSuccessMessage(null);
 
@@ -451,7 +437,7 @@ export function GoogleDriveBookSyncModal({
             </div>
 
             <div className="flex flex-wrap items-center gap-2.5">
-              {needsAuth ? (
+              {needsAuth && (
                 <button
                   type="button"
                   onClick={handleGoogleLogin}
@@ -494,30 +480,30 @@ export function GoogleDriveBookSyncModal({
                       : 'Sign in with Google'}
                   </span>
                 </button>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    onClick={handleSyncAllMappedBooks}
-                    disabled={Boolean(activeProgress)}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-teal-600 hover:bg-teal-500 disabled:opacity-50 text-white text-xs font-bold transition cursor-pointer"
-                  >
-                    <CloudDownload className="w-4 h-4" />
-                    <span>
-                      {lang === 'ar'
-                        ? 'مزامنة وفهرسة جميع الكتب من Drive'
-                        : 'Sync All Reference Books from Drive'}
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void logout()}
-                    className="inline-flex items-center gap-1 px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold cursor-pointer"
-                  >
-                    <LogOut className="w-3.5 h-3.5" />
-                    <span>{lang === 'ar' ? 'تسجيل الخروج' : 'Sign Out'}</span>
-                  </button>
-                </>
+              )}
+              <button
+                type="button"
+                onClick={handleSyncAllMappedBooks}
+                disabled={Boolean(activeProgress)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-teal-600 hover:bg-teal-500 disabled:opacity-50 text-white text-xs font-bold transition cursor-pointer"
+              >
+                <CloudDownload className="w-4 h-4" />
+                <span>
+                  {lang === 'ar'
+                    ? 'مزامنة وفهرسة جميع الكتب من روابط Drive'
+                    : 'Sync All Reference Books from Drive'}
+                </span>
+              </button>
+
+              {!needsAuth && (
+                <button
+                  type="button"
+                  onClick={() => void logout()}
+                  className="inline-flex items-center gap-1 px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold cursor-pointer"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span>{lang === 'ar' ? 'تسجيل الخروج' : 'Sign Out'}</span>
+                </button>
               )}
 
               {/* Direct Local PDF File Upload Option */}

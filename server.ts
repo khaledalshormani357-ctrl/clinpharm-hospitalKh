@@ -26,16 +26,30 @@ interface CopilotChatRequestBody {
 
 async function startServer() {
   const app = express();
-  app.use(express.json({ limit: '4mb' }));
+
+  // Enable CORS on all API routes so GitHub Pages and Android APK clients can connect seamlessly
+  app.use('/api', (req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Expose-Headers', 'X-Drive-Filename, Content-Length');
+    if (req.method === 'OPTIONS') {
+      res.status(204).end();
+      return;
+    }
+    next();
+  });
+
+  app.use(express.json({ limit: '6mb' }));
 
   app.get('/api/copilot/health', (_req, res) => {
-    const hasKey = Boolean(process.env.GEMINI_API_KEY);
+    const hasKey = Boolean(process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY);
     res.json({
       ok: true,
       liveAiReady: hasKey,
       model: 'gemini-3.8-flash',
       libraryBooksCount: 6,
-      libraryChaptersCount: 43
+      libraryChaptersCount: 44
     });
   });
 
@@ -55,7 +69,7 @@ async function startServer() {
         return;
       }
 
-      const apiKey = process.env.GEMINI_API_KEY;
+      const apiKey = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
       if (!apiKey) {
         res.status(503).json({
           error: 'GEMINI_API_KEY is not configured in the server environment.'
@@ -81,7 +95,7 @@ ${patientContext || 'No specific inpatient selected.'}
 ${referenceContext || 'Standard hospital references loaded.'}
 
 3. VERBATIM UNABRIDGED TEXTBOOK EXCERPTS (DiPiro 13th Ed, ACCP Cardiology 2026, ACCP Updates 2026 Vol 1 & Vol 2, Pharmacotherapy Casebook PPCP Guide, Hospital Dosing Compendium):
-${verbatimLibraryContext || 'All 6 reference books (43 chapters) indexed.'}
+${verbatimLibraryContext || 'All 6 reference books (44 chapters) indexed.'}
 
 CRITICAL CLINICAL & FORMATTING DIRECTIVES:
 - Provide real, deep, patient-specific clinical reasoning grounded in the active patient's exact CrCl, serum potassium, sodium, liver function, allergies, hemodynamic status, and medication list, as well as the verbatim textbook excerpts above.
@@ -104,16 +118,32 @@ CRITICAL CLINICAL & FORMATTING DIRECTIVES:
         }
       ];
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
-        contents,
-        config: {
-          systemInstruction,
-          temperature: 0.25
-        }
-      });
+      let replyText = '';
+      let usedModel = 'gemini-3.8-flash';
 
-      const replyText = response.text?.trim();
+      try {
+        const response = await ai.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents,
+          config: {
+            systemInstruction,
+            temperature: 0.25
+          }
+        });
+        replyText = response.text?.trim() || '';
+      } catch {
+        usedModel = 'gemini-flash-latest';
+        const fallbackResponse = await ai.models.generateContent({
+          model: 'gemini-flash-latest',
+          contents,
+          config: {
+            systemInstruction,
+            temperature: 0.25
+          }
+        });
+        replyText = fallbackResponse.text?.trim() || '';
+      }
+
       if (!replyText) {
         res.status(502).json({
           error: 'Empty response from Gemini model.'
@@ -123,7 +153,7 @@ CRITICAL CLINICAL & FORMATTING DIRECTIVES:
 
       res.json({
         text: replyText,
-        model: 'gemini-3.8-flash',
+        model: usedModel,
         liveAi: true
       });
     } catch (error: unknown) {
@@ -133,6 +163,108 @@ CRITICAL CLINICAL & FORMATTING DIRECTIVES:
         error: errMessage
       });
     }
+  });
+
+  // Direct Google Drive Public / Shared Link PDF Proxy (allows importing shared Drive PDFs without OAuth popup)
+  app.get('/api/drive/fetch-pdf', async (req, res) => {
+    try {
+      const fileId = String(req.query.fileId || '').trim();
+      if (!fileId || !/^[a-zA-Z0-9_-]{8,}$/.test(fileId)) {
+        res.status(400).json({ error: 'Valid Google Drive fileId is required.' });
+        return;
+      }
+
+      const authHeader = req.headers.authorization;
+      const candidateUrls = [
+        `https://drive.usercontent.google.com/download?id=${encodeURIComponent(fileId)}&export=download&confirm=t`,
+        `https://drive.google.com/uc?export=download&id=${encodeURIComponent(fileId)}&confirm=t`
+      ];
+
+      if (authHeader?.startsWith('Bearer ')) {
+        candidateUrls.unshift(
+          `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`
+        );
+      }
+
+      for (const url of candidateUrls) {
+        try {
+          const headers: Record<string, string> = {
+            'User-Agent':
+              'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+          };
+          if (url.includes('googleapis.com') && authHeader) {
+            headers.Authorization = authHeader;
+          }
+
+          const upstream = await fetch(url, {
+            headers,
+            redirect: 'follow'
+          });
+
+          if (!upstream.ok) continue;
+
+          const contentType = upstream.headers.get('content-type') || '';
+          const arrayBuf = await upstream.arrayBuffer();
+          const buf = Buffer.from(arrayBuf);
+
+          // Check if buffer starts with %PDF-
+          if (buf.length > 5 && buf.subarray(0, 5).toString('ascii') === '%PDF-') {
+            const disposition = upstream.headers.get('content-disposition') || '';
+            const filenameMatch = disposition.match(/filename\*?=(?:UTF-8'')?["']?([^"';\n]+)["']?/i);
+            const filename = filenameMatch?.[1]
+              ? decodeURIComponent(filenameMatch[1])
+              : `${fileId}.pdf`;
+
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader('Content-Length', String(buf.length));
+            res.setHeader('X-Drive-Filename', encodeURIComponent(filename));
+            res.send(buf);
+            return;
+          }
+
+          // If HTML confirmation page was returned, extract confirm UUID if present
+          if (contentType.includes('text/html')) {
+            const html = buf.toString('utf8');
+            const uuidMatch = html.match(/name="uuid"\s+value="([^"]+)"/i);
+            if (uuidMatch?.[1]) {
+              const confirmUrl = `https://drive.usercontent.google.com/download?id=${encodeURIComponent(
+                fileId
+              )}&export=download&confirm=t&uuid=${encodeURIComponent(uuidMatch[1])}`;
+              const confirmedUpstream = await fetch(confirmUrl, { headers, redirect: 'follow' });
+              if (confirmedUpstream.ok) {
+                const confirmedBuf = Buffer.from(await confirmedUpstream.arrayBuffer());
+                if (
+                  confirmedBuf.length > 5 &&
+                  confirmedBuf.subarray(0, 5).toString('ascii') === '%PDF-'
+                ) {
+                  res.setHeader('Content-Type', 'application/pdf');
+                  res.setHeader('Content-Length', String(confirmedBuf.length));
+                  res.setHeader('X-Drive-Filename', encodeURIComponent(`${fileId}.pdf`));
+                  res.send(confirmedBuf);
+                  return;
+                }
+              }
+            }
+          }
+        } catch {
+          // Try next candidate URL
+        }
+      }
+
+      res.status(404).json({
+        error:
+          'Could not download PDF directly. Ensure the Google Drive file sharing is set to "Anyone with the link" or sign in with Google.'
+      });
+    } catch (error: unknown) {
+      res.status(500).json({
+        error: error instanceof Error ? error.message : 'Failed to proxy Google Drive PDF'
+      });
+    }
+  });
+
+  // Ensure unmatched /api/* routes always return JSON and never HTML
+  app.use('/api', (_req, res) => {
+    res.status(404).json({ error: 'API endpoint not found' });
   });
 
   if (process.env.NODE_ENV !== 'production') {
