@@ -15,6 +15,7 @@ import {
   casebookAdditionalChapters,
   hospitalCompendiumAdditionalChapters
 } from './monographs/casebookAndHospitalAllChaptersMonograph';
+import { stockleysDrugInteractionsChapters } from './monographs/stockleysDrugInteractionsMonograph';
 
 export * from './libraryTypes';
 
@@ -153,6 +154,24 @@ export const VERBATIM_BOOKS: VerbatimBook[] = [
     descriptionAr:
       'موسوعة المستشفى السريرية الشاملة بأقسامها الخمسة (A-E) لضوابط التسريب الوريدي، جداول الهيبارين، رافعات الضغط، ترشيد المضادات، والغسيل الكلوي.',
     chapters: hospitalCompendiumAllChapters
+  },
+  {
+    id: 'stockleys-drug-interactions',
+    title: "Stockley's Drug Interactions: Clinical Pharmacokinetic & Pharmacodynamic DDI Database",
+    titleAr: "مرجع ستوكلي للتداخلات الدوائية (Stockley's Drug Interactions — قاعدة بيانات التعارضات الدوائية المعتمدة)",
+    subtitle: 'Authoritative PK/PD Drug Interaction Mechanisms, CYP450/P-gp Matrices, Severity Action Ratings & Bedside Management (Drive ID: 1eg07NXxWYgJq0NxLf0Vim1JlV7KTu16S)',
+    subtitleAr: 'الموسوعة المرجعية العالمية للتعارضات الدوائية: آليات CYP450 و P-gp، تطاول QTc، مضادات التخثر، المضادات الحيوية، وخوارزميات التدبير السريري',
+    edition: "Stockley's Hospital Reference Edition (Google Drive Archive: 1eg07NXxWYgJq0NxLf0Vim1JlV7KTu16S)",
+    editors: 'Karen Baxter, Claire L. Preston (Pharmaceutical Press)',
+    publisher: 'Pharmaceutical Press (Royal Pharmaceutical Society)',
+    isbnOrUan: 'Drive Ref: 1eg07NXxWYgJq0NxLf0Vim1JlV7KTu16S',
+    badge: "Stockley's Drug Interactions",
+    badgeAr: "مرجع Stockley's للتداخلات",
+    description:
+      "World's most authoritative clinical reference on drug-drug, drug-herb, and drug-food interactions, detailing exact pharmacokinetic/pharmacodynamic mechanisms, onset, clinical severity, and actionable dose adjustments.",
+    descriptionAr:
+      'المرجع العالمي الأول والأوثق للتداخلات والتعارضات الدوائية، يشرح الآلية الدوائية الحركية والديناميكية ومستوى الخطورة والإجراء الإكلينيكي المطلوب لضبط الجرعات أو استبدال الدواء.',
+    chapters: stockleysDrugInteractionsChapters
   }
 ];
 

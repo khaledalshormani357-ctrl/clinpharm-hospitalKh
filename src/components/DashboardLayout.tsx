@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Patient, Language, ClinicalIntervention, ReconciliationDiscrepancy, Medication } from '../types/clinical';
+import { Patient, PatientStatus, Language, ClinicalIntervention, ReconciliationDiscrepancy, Medication, LabResult } from '../types/clinical';
 import { translations } from '../lib/i18n';
 import {
   Users,
@@ -48,6 +48,7 @@ interface Props {
   discrepancies: ReconciliationDiscrepancy[];
   onAddPatient: (patient: Patient) => void;
   onAddMedication: (patientId: string, med: Medication) => void;
+  onUpdatePatientLabs?: (patientId: string, updatedLabs: LabResult) => void;
   onAddIntervention: (int: ClinicalIntervention) => void;
   onUpdateInterventionStatus: (id: string, status: any, feedback?: string) => void;
   onAddDiscrepancy: (disc: ReconciliationDiscrepancy) => void;
@@ -60,6 +61,7 @@ export function DashboardLayout({
   discrepancies,
   onAddPatient,
   onAddMedication,
+  onUpdatePatientLabs,
   onAddIntervention,
   onUpdateInterventionStatus,
   onAddDiscrepancy,
@@ -71,6 +73,7 @@ export function DashboardLayout({
     'patients' | 'reconciliation' | 'calculators' | 'alerts' | 'interventions' | 'guidelines' | 'training'
   >('patients');
   const [selectedWard, setSelectedWard] = useState<string>('all');
+  const [selectedStatus, setSelectedStatus] = useState<'all' | PatientStatus>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
   // Modals
@@ -92,15 +95,68 @@ export function DashboardLayout({
 
   const t = translations[lang];
 
+  const getStatusBadgeStyle = (status: PatientStatus) => {
+    switch (status) {
+      case 'critical':
+        return {
+          badgeClass:
+            'bg-rose-50 text-rose-700 dark:bg-rose-950/80 dark:text-rose-200 border border-rose-300 dark:border-rose-800 shadow-2xs',
+          dotClass: 'bg-rose-600 animate-ping',
+          solidDotClass: 'bg-rose-600',
+          avatarClass: 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300 ring-2 ring-rose-300/60 dark:ring-rose-800/60',
+          cardBorderClass: 'border-s-4 border-s-rose-500 border-slate-200/90 dark:border-slate-800'
+        };
+      case 'observation':
+        return {
+          badgeClass:
+            'bg-amber-50 text-amber-800 dark:bg-amber-950/80 dark:text-amber-200 border border-amber-300 dark:border-amber-800 shadow-2xs',
+          dotClass: 'bg-amber-500 animate-pulse',
+          solidDotClass: 'bg-amber-500',
+          avatarClass: 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 ring-2 ring-amber-300/60 dark:ring-amber-800/60',
+          cardBorderClass: 'border-s-4 border-s-amber-500 border-slate-200/90 dark:border-slate-800'
+        };
+      case 'improving':
+        return {
+          badgeClass:
+            'bg-sky-50 text-sky-700 dark:bg-sky-950/80 dark:text-sky-200 border border-sky-300 dark:border-sky-800 shadow-2xs',
+          dotClass: 'bg-sky-500',
+          solidDotClass: 'bg-sky-500',
+          avatarClass: 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300 ring-2 ring-sky-300/60 dark:ring-sky-800/60',
+          cardBorderClass: 'border-s-4 border-s-sky-500 border-slate-200/90 dark:border-slate-800'
+        };
+      case 'discharge_planned':
+        return {
+          badgeClass:
+            'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/80 dark:text-indigo-200 border border-indigo-300 dark:border-indigo-800 shadow-2xs',
+          dotClass: 'bg-indigo-500',
+          solidDotClass: 'bg-indigo-500',
+          avatarClass: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300 ring-2 ring-indigo-300/60 dark:ring-indigo-800/60',
+          cardBorderClass: 'border-s-4 border-s-indigo-500 border-slate-200/90 dark:border-slate-800'
+        };
+      case 'stable':
+      default:
+        return {
+          badgeClass:
+            'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/80 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-800 shadow-2xs',
+          dotClass: 'bg-emerald-500',
+          solidDotClass: 'bg-emerald-500',
+          avatarClass: 'bg-teal-100 text-teal-800 dark:bg-teal-950 dark:text-teal-300 ring-2 ring-emerald-300/50 dark:ring-emerald-800/50',
+          cardBorderClass: 'border-s-4 border-s-emerald-500 border-slate-200/90 dark:border-slate-800'
+        };
+    }
+  };
+
   const filteredPatients = patients.filter(p => {
     if (selectedWard !== 'all' && p.ward !== selectedWard) return false;
+    if (selectedStatus !== 'all' && p.status !== selectedStatus) return false;
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       return (
         p.name.toLowerCase().includes(q) ||
         p.nameEn.toLowerCase().includes(q) ||
         p.mrn.toLowerCase().includes(q) ||
-        p.room.toLowerCase().includes(q)
+        p.room.toLowerCase().includes(q) ||
+        (p.caseReport?.chiefComplaint || '').toLowerCase().includes(q)
       );
     }
     return true;
@@ -427,33 +483,82 @@ export function DashboardLayout({
               </div>
             </div>
 
-            {/* Filter Controls: Horizontal Scrollable Ward Chips & Search */}
-            <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
-              <div className="flex gap-1.5 sm:gap-2 overflow-x-auto pb-1 no-scrollbar -mx-1 px-1">
-                {(['all', 'ICU', 'CCU', 'InternalMedicine', 'Surgery', 'Oncology', 'Pediatrics'] as const).map(w => (
-                  <button
-                    key={w}
-                    onClick={() => setSelectedWard(w)}
-                    className={`min-h-[38px] px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition border ${
-                      selectedWard === w
-                        ? 'bg-slate-900 text-white dark:bg-teal-600 dark:text-white border-transparent shadow-xs'
-                        : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:bg-slate-100'
-                    }`}
-                  >
-                    {w === 'all' ? t.wards.all : t.wards[w]}
-                  </button>
-                ))}
+            {/* Filter Controls: Horizontal Scrollable Ward Chips, Status Badges & Search */}
+            <div className="space-y-2.5">
+              <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
+                <div className="flex gap-1.5 sm:gap-2 overflow-x-auto pb-1 no-scrollbar -mx-1 px-1">
+                  {(['all', 'ICU', 'CCU', 'InternalMedicine', 'Surgery', 'Oncology', 'Pediatrics'] as const).map(w => (
+                    <button
+                      key={w}
+                      onClick={() => setSelectedWard(w)}
+                      className={`min-h-[38px] px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition border ${
+                        selectedWard === w
+                          ? 'bg-slate-900 text-white dark:bg-teal-600 dark:text-white border-transparent shadow-xs'
+                          : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:bg-slate-100'
+                      }`}
+                    >
+                      {w === 'all' ? t.wards.all : t.wards[w]}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="relative w-full sm:w-72">
+                  <Search className="w-4 h-4 absolute right-3 top-3 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder={t.actions.search}
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                    className="w-full min-h-[42px] text-xs pl-3 pr-9 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500 shadow-xs"
+                  />
+                </div>
               </div>
 
-              <div className="relative w-full sm:w-72">
-                <Search className="w-4 h-4 absolute right-3 top-3 text-slate-400" />
-                <input
-                  type="text"
-                  placeholder={t.actions.search}
-                  value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
-                  className="w-full min-h-[42px] text-xs pl-3 pr-9 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500 shadow-xs"
-                />
+              {/* Color-Coded Patient Status Badges Filter Bar */}
+              <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto pb-1 no-scrollbar">
+                <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 shrink-0 me-1">
+                  {lang === 'ar' ? 'حالة المريض:' : 'Patient Status:'}
+                </span>
+                <button
+                  onClick={() => setSelectedStatus('all')}
+                  className={`px-2.5 py-1 rounded-full text-[11px] font-bold whitespace-nowrap transition border flex items-center gap-1.5 ${
+                    selectedStatus === 'all'
+                      ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 border-transparent'
+                      : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:bg-slate-100'
+                  }`}
+                >
+                  <span>{lang === 'ar' ? 'الكل (All)' : 'All Statuses'}</span>
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-200/80 dark:bg-slate-800 text-slate-800 dark:text-slate-200">
+                    {patients.length}
+                  </span>
+                </button>
+
+                {(['critical', 'observation', 'improving', 'stable', 'discharge_planned'] as PatientStatus[]).map(st => {
+                  const count = patients.filter(p => p.status === st).length;
+                  const style = getStatusBadgeStyle(st);
+                  const isSelected = selectedStatus === st;
+
+                  return (
+                    <button
+                      key={st}
+                      onClick={() => setSelectedStatus(isSelected ? 'all' : st)}
+                      className={`px-2.5 py-1 rounded-full text-[11px] font-bold whitespace-nowrap transition flex items-center gap-1.5 ${
+                        style.badgeClass
+                      } ${isSelected ? 'ring-2 ring-offset-1 ring-slate-900 dark:ring-teal-400 scale-[1.02]' : 'opacity-85 hover:opacity-100'}`}
+                    >
+                      <span className="relative flex h-2 w-2">
+                        {st === 'critical' && (
+                          <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${style.solidDotClass}`} />
+                        )}
+                        <span className={`relative inline-flex rounded-full h-2 w-2 ${style.solidDotClass}`} />
+                      </span>
+                      <span>{t.status[st]}</span>
+                      <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-white/80 dark:bg-slate-900/80 font-mono">
+                        {count}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
@@ -468,11 +573,12 @@ export function DashboardLayout({
                   patient.labs.serumCreatinine
                 );
                 const safety = analyzePatientSafety(patient);
+                const statusStyle = getStatusBadgeStyle(patient.status);
 
                 return (
                   <div
                     key={patient.id}
-                    className="bg-white dark:bg-slate-900 rounded-2xl sm:rounded-3xl p-4 sm:p-5 border border-slate-200/90 dark:border-slate-800 shadow-xs hover:shadow-md transition flex flex-col justify-between"
+                    className={`bg-white dark:bg-slate-900 rounded-2xl sm:rounded-3xl p-4 sm:p-5 border ${statusStyle.cardBorderClass} shadow-xs hover:shadow-md transition flex flex-col justify-between`}
                   >
                     <div>
                       {/* Card Header */}
@@ -480,11 +586,7 @@ export function DashboardLayout({
                         <div className="flex items-center gap-3 min-w-0">
                           <div
                             dir="ltr"
-                            className={`w-11 h-11 rounded-2xl flex items-center justify-center font-extrabold text-sm shrink-0 ${
-                              patient.status === 'critical'
-                                ? 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300'
-                                : 'bg-teal-100 text-teal-800 dark:bg-teal-950 dark:text-teal-300'
-                            }`}
+                            className={`w-11 h-11 rounded-2xl flex items-center justify-center font-extrabold text-sm shrink-0 ${statusStyle.avatarClass}`}
                           >
                             {patient.age}y
                           </div>
@@ -507,16 +609,50 @@ export function DashboardLayout({
                           </div>
                         </div>
 
+                        {/* Color-Coded Visual Status Badge with Animated Indicator Dot */}
                         <span
-                          className={`text-[10px] px-2.5 py-1 rounded-full font-bold shrink-0 ${
-                            patient.status === 'critical'
-                              ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300 border border-rose-200/60'
-                              : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200/60'
-                          }`}
+                          className={`text-[10px] px-2.5 py-1 rounded-full font-extrabold shrink-0 inline-flex items-center gap-1.5 ${statusStyle.badgeClass}`}
                         >
-                          {t.status[patient.status]}
+                          <span className="relative flex h-2 w-2">
+                            {(patient.status === 'critical' || patient.status === 'observation') && (
+                              <span
+                                className={`absolute inline-flex h-full w-full rounded-full opacity-75 ${statusStyle.dotClass}`}
+                              />
+                            )}
+                            <span className={`relative inline-flex rounded-full h-2 w-2 ${statusStyle.solidDotClass}`} />
+                          </span>
+                          <span>{t.status[patient.status]}</span>
                         </span>
                       </div>
+
+                      {/* e-Casebook Chief Complaint (CC) & Vital Signs Quick Strip */}
+                      {patient.caseReport && (
+                        <div className="mb-3 p-2.5 rounded-xl bg-slate-50/90 dark:bg-slate-800/50 border border-slate-200/70 dark:border-slate-800 space-y-1.5">
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="text-[11px] text-slate-700 dark:text-slate-300 line-clamp-1 font-medium">
+                              <span className="font-extrabold text-teal-700 dark:text-teal-400 me-1">CC:</span>
+                              {patient.caseReport.chiefComplaint}
+                            </p>
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-teal-100/80 dark:bg-teal-950 text-teal-800 dark:text-teal-300 shrink-0">
+                              e-Casebook
+                            </span>
+                          </div>
+                          <div dir="ltr" className="flex flex-wrap items-center gap-2 text-[10px] font-mono text-slate-600 dark:text-slate-400">
+                            <span className="px-1.5 py-0.5 rounded bg-white dark:bg-slate-900 border border-slate-200/70 dark:border-slate-700">
+                              BP: <strong className="text-slate-800 dark:text-slate-200">{patient.caseReport.vitals.bp}</strong>
+                            </span>
+                            <span className="px-1.5 py-0.5 rounded bg-white dark:bg-slate-900 border border-slate-200/70 dark:border-slate-700">
+                              HR: <strong className="text-slate-800 dark:text-slate-200">{patient.caseReport.vitals.hr}</strong> bpm
+                            </span>
+                            <span className="px-1.5 py-0.5 rounded bg-white dark:bg-slate-900 border border-slate-200/70 dark:border-slate-700">
+                              SpO2: <strong className="text-slate-800 dark:text-slate-200">{patient.caseReport.vitals.spo2}</strong>
+                            </span>
+                            <span className="px-1.5 py-0.5 rounded bg-white dark:bg-slate-900 border border-slate-200/70 dark:border-slate-700">
+                              T: <strong className="text-slate-800 dark:text-slate-200">{patient.caseReport.vitals.temp}°C</strong>
+                            </span>
+                          </div>
+                        </div>
+                      )}
 
                       {/* Primary Diagnoses Preview Chips */}
                       <div className="flex flex-wrap gap-1.5 mb-3">
@@ -592,7 +728,7 @@ export function DashboardLayout({
                         onClick={() => setSelectedPatient(patient)}
                         className="flex-1 min-h-[44px] py-2 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-bold transition text-center active:scale-[0.99]"
                       >
-                        {t.patient.viewFile}
+                        {lang === 'ar' ? 'ملف المريض & Case Report' : t.patient.viewFile}
                       </button>
 
                       <button
@@ -634,6 +770,7 @@ export function DashboardLayout({
             onSelectPatientForIntervention={(p) => {
               handleOpenInterventionModal(p);
             }}
+            onOpenLocalReference={handleOpenLocalReference}
           />
         )}
 
@@ -819,7 +956,10 @@ export function DashboardLayout({
         isOpen={isCopilotOpen}
         onClose={() => setIsCopilotOpen(false)}
         lang={lang}
-        currentPatient={selectedPatient || patients[0]}
+        currentPatient={
+          (selectedPatient ? patients.find(p => p.id === selectedPatient.id) || selectedPatient : null) ||
+          patients[0]
+        }
         initialPrompt={copilotPrompt}
         onClearInitialPrompt={() => setCopilotPrompt(null)}
         onOpenLocalReference={handleOpenLocalReference}
@@ -827,11 +967,12 @@ export function DashboardLayout({
 
       {/* Patient Details Modal */}
       <PatientDetailsModal
-        patient={selectedPatient}
+        patient={selectedPatient ? patients.find(p => p.id === selectedPatient.id) || selectedPatient : null}
         isOpen={!!selectedPatient}
         onClose={() => setSelectedPatient(null)}
         lang={lang}
         onAddMedication={onAddMedication}
+        onUpdatePatientLabs={onUpdatePatientLabs}
         onAddIntervention={onAddIntervention}
         onOpenInterventionModal={handleOpenInterventionModal}
         onOpenLocalReference={handleOpenLocalReference}

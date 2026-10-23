@@ -14,6 +14,10 @@ import {
   getSyncedFullBookByIdSync,
   SyncedFullBookRecord
 } from '../../lib/googleDrive/fullBookIdb';
+import {
+  downloadOfflinePdfFromVault,
+  formatStorageBytes
+} from '../../lib/googleDrive/pdfOfflineStorageService';
 import { GoogleDriveBookSyncModal } from './GoogleDriveBookSyncModal';
 import { PdfPageCanvasViewer } from './PdfPageCanvasViewer';
 import {
@@ -709,17 +713,29 @@ export function ClinicalLibraryViewer({
                   <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
                   <span>
                     {lang === 'ar'
-                      ? `الكتاب الكامل مفهرس حرفياً من Google Drive: ${syncedFullBookRecord.fileName} (${syncedFullBookRecord.totalPages} صفحة كاملة • ${syncedFullBookRecord.totalChapters} فصلاً)`
-                      : `Full PDF Synced & Indexed: ${syncedFullBookRecord.fileName} (${syncedFullBookRecord.totalPages} Total Pages • ${syncedFullBookRecord.totalChapters} Chapters)`}
+                      ? `محفوظ محلياً في IndexedDB (يعمل 100% بدون إنترنت): ${syncedFullBookRecord.fileName} (${syncedFullBookRecord.totalPages} صفحة • ${formatStorageBytes(syncedFullBookRecord.fileSize)})`
+                      : `Cached Offline in IndexedDB (100% Offline Ready): ${syncedFullBookRecord.fileName} (${syncedFullBookRecord.totalPages} Pages • ${formatStorageBytes(syncedFullBookRecord.fileSize)})`}
                   </span>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setDriveSyncModalOpen(true)}
-                  className="text-teal-700 dark:text-teal-300 font-bold hover:underline cursor-pointer"
-                >
-                  {lang === 'ar' ? 'إدارة ملفات Google Drive' : 'Manage Drive Sync'}
-                </button>
+                <div className="flex items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => void downloadOfflinePdfFromVault(activeBook.id)}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-teal-600 hover:bg-teal-500 text-white font-bold cursor-pointer"
+                  >
+                    <FileDown className="w-3.5 h-3.5" />
+                    <span>
+                      {lang === 'ar' ? 'تنزيل PDF بدون إنترنت' : 'Download Offline PDF'}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDriveSyncModalOpen(true)}
+                    className="text-teal-700 dark:text-teal-300 font-bold hover:underline cursor-pointer"
+                  >
+                    {lang === 'ar' ? 'إدارة خزنة IndexedDB' : 'Manage Offline Vault'}
+                  </button>
+                </div>
               </div>
             )}
 

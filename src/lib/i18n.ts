@@ -44,10 +44,11 @@ export const translations = {
 
     // Statuses
     status: {
-      critical: 'Critical (حرج)',
-      stable: 'Stable (مستقر)',
-      improving: 'Improving (في تحسن)',
-      discharge_planned: 'Discharge Planned',
+      critical: 'حرج (Critical)',
+      observation: 'تحت الملاحظة (Under Observation)',
+      stable: 'مستقر (Stable)',
+      improving: 'في تحسن (Improving)',
+      discharge_planned: 'مخطط للخروج (Discharge Planned)',
       pending: 'Pending Review',
       accepted: 'Accepted (مقبول)',
       modified: 'Modified (معدل)',
@@ -151,9 +152,10 @@ export const translations = {
     },
 
     status: {
-      critical: 'Critical',
-      stable: 'Stable',
-      improving: 'Improving',
+      critical: 'Critical (حرج)',
+      observation: 'Under Observation (تحت الملاحظة)',
+      stable: 'Stable (مستقر)',
+      improving: 'Improving (في تحسن)',
       discharge_planned: 'Discharge Planned',
       pending: 'Pending Review',
       accepted: 'Accepted by Physician',

@@ -29,7 +29,7 @@ export interface QuickReferenceTable {
 
 export interface AccpChapterReference {
   id: string;
-  bookId: 'accp-2026-vol1' | 'accp-2026-vol2' | 'dipiro-13th' | 'accp-cardio-2026' | 'casebook-guide' | 'notebooklm-hub' | 'hospital-compendium';
+  bookId: 'accp-2026-vol1' | 'accp-2026-vol2' | 'dipiro-13th' | 'accp-cardio-2026' | 'casebook-guide' | 'notebooklm-hub' | 'hospital-compendium' | 'stockleys-drug-interactions';
   volume: 1 | 2 | 13 | 2026;
   chapterNumber: number;
   pages: string;
@@ -286,10 +286,140 @@ export const PRIMARY_CLINICAL_REFERENCES: ExternalReferenceSource[] = [
       'يحدد أهم المعلومات والتحاليل والفخاخ الدوائية التي يجب أن يجمعها الصيدلي أو الطالب في كل متلازمة سريرية.',
       'موظف عملياً كحالات اختبار حية لمحركات التطبيق (App Test Cases) وكحالات تدريبية تفاعلية للطلاب (Student OSCE Cases).'
     ]
+  },
+  {
+    id: 'stockleys-drug-interactions',
+    title: "Stockley's Drug Interactions (13th Ed / 2026 Clinical DDI Database)",
+    titleAr: 'موسوعة ستوكلي للتعارضات والتداخلات الدوائية (Stockley’s Drug Interactions — قاعدة بيانات DDI)',
+    subtitle: 'Primary Clinical Drug-Drug Interaction (DDI) Reference Database • Drive Archive: 1eg07NXxWYgJq0NxLf0Vim1JlV7KTu16S',
+    subtitleAr: 'المرجع العالمي الأول وقاعدة البيانات المعتمدة للتعارضات الدوائية الحركية والديناميكية وتصنيفات الخطورة السريرية',
+    type: 'gdrive_textbook',
+    viewUrl: 'local://ref/source/stockleys-drug-interactions',
+    downloadUrl: 'https://drive.google.com/file/d/1eg07NXxWYgJq0NxLf0Vim1JlV7KTu16S/view?usp=drivesdk',
+    badge: "Stockley's Drug Interactions",
+    badgeAr: 'مرجع Stockley للتعارضات الدوائية',
+    metadata: 'Local DB ID: stockleys-drug-interactions (Google Drive File ID: 1eg07NXxWYgJq0NxLf0Vim1JlV7KTu16S) • Full DDI Engine & IndexedDB Sync',
+    metadataAr: 'قاعدة بيانات محلية: Stockley’s Drug Interactions (Drive ID: 1eg07NXxWYgJq0NxLf0Vim1JlV7KTu16S) • مربوطة بمحرك فحص التداخلات و IndexedDB',
+    citationTemplate:
+      "Preston CL, ed. Stockley's Drug Interactions. 13th ed. Pharmaceutical Press; 2026. [Drive ID: 1eg07NXxWYgJq0NxLf0Vim1JlV7KTu16S | local://ref/source/stockleys-drug-interactions]",
+    highlights: [
+      'Authoritative Stockley Action Ratings (Contraindicated / Avoid / Adjust Dose / Monitor TDM) for CYP450, P-gp, OATP1B1, QTc, Serotonergic, and Nephrotoxic interactions.',
+      'Directly powers the hospital DDI Screening Engine, Automated Patient Safety Scanner, and AI Clinical Copilot.',
+      'Linked to Google Drive PDF (1eg07NXxWYgJq0NxLf0Vim1JlV7KTu16S) for 1-click offline IndexedDB storage and verbatim chapter browsing.'
+    ],
+    highlightsAr: [
+      'يوفر تصنيفات ستوكلي الإكلينيكية (Stockley Action Ratings) للتداخلات الاستقلابية (CYP450 / P-gp) والديناميكية (QTc، متلازمة السيروتونين، السمية الكلوية، والنزيف).',
+      'يعمل كقاعدة البيانات الأساسية لمحرك فحص التعارضات الدوائية (Alerts & DDI Engine) والمساعد السريري الذكي.',
+      'مربوط مباشرةً بملف Google Drive المرفوع (1eg07NXxWYgJq0NxLf0Vim1JlV7KTu16S) للمزامنة والتخزين المحلي في المتصفح (IndexedDB).'
+    ]
   }
 ];
 
 export const ACCP_2026_CHAPTERS: AccpChapterReference[] = [
+  // ==================== STOCKLEY'S DRUG INTERACTIONS MASTER REFERENCE ====================
+  {
+    id: 'stockleys-ddi-master',
+    bookId: 'stockleys-drug-interactions',
+    volume: 13,
+    chapterNumber: 1,
+    pages: 'Sections 1–3 (Anticoagulants, CV/QTc, Antimicrobials & Critical Care DDIs)',
+    category: 'Drug Interactions & Safety',
+    categoryAr: 'التعارضات الدوائية وسلامة المرضى (Stockley’s DDI)',
+    title: "Stockley's Drug Interactions: Clinical Mechanisms, Action Ratings, CYP450/Transporter Matrices & Management",
+    titleAr: 'موسوعة Stockley للتعارضات الدوائية: الآليات الحركية والديناميكية، جداول الإنزيمات الناقلة، وبروتوكولات التدبير السريري',
+    authors: 'Claire L. Preston, BPharm, MRPharmS (Editor) — Pharmaceutical Press',
+    summary:
+      'Comprehensive evidence-based drug-drug interaction monographs covering anticoagulants (Warfarin, Apixaban, Rivaroxaban), antiplatelets (Clopidogrel + CYP2C19 PPIs), cardiovascular/QTc/RAAS combinations (ACEi + ARNI 36h washout, Spironolactone hyperkalemia, Digoxin P-gp toxicity, Statin myopathy), and ICU antimicrobials (Carbapenem + Valproate collapse, Vancomycin + Pip/Tazo AKI, Linezolid serotonin syndrome).',
+    summaryAr:
+      'المرجع السريري الشامل للتعارضات الدوائية وفق منهجية Stockley: يغطي تداخلات مضادات التخثر والصفائح، أدوية القلب وتطاول QTc، الحصار المزدوج لـ RAAS، سمية الديجوكسين والستاتينات، وتداخلات المضادات الحيوية الحرجة في العناية المركزة.',
+    pathophysiology:
+      'Clinically significant drug interactions arise via two primary mechanisms: (1) Pharmacokinetic (PK) alterations in absorption (divalent cation chelation), distribution (protein-binding displacement), hepatic/intestinal CYP450 metabolism (CYP2C9, CYP3A4, CYP2C19 inhibition or induction), or transmembrane efflux/uptake transporters (P-glycoprotein, OATP1B1, UGT); and (2) Pharmacodynamic (PD) synergy or antagonism at target receptors/physiological systems (additive IKr hERG blockade prolonging QTc, dual RAAS potassium retention, 5-HT accumulation, or synergistic tubular nephrotoxicity).',
+    pathophysiologyAr:
+      'تنشأ التعارضات الدوائية ذات الأهمية السريرية عبر آليتين رئيسيتين: (1) تداخلات حركية دوائية (Pharmacokinetic) تشمل الامتصاص (الاستخلاب بالمعادن ثنائية/ثلاثية التكافؤ)، الاستقلاب الكبدي والمعوي عبر إنزيمات السيتوكروم (CYP3A4, CYP2C9, CYP2C19)، أو النواقل الغشائية (P-gp, OATP1B1, UGT)؛ و(2) تداخلات ديناميكية دوائية (Pharmacodynamic) تشمل التآزر السمي مثل حصار قنوات البوتاسيوم القلبية (QTc Prolongation / Torsades)، احتباس البوتاسيوم الكلوي، متلازمة السيروتونين، أو السمية الكلوية المشتركة.',
+    algorithmSteps: [
+      'Step 1 (Classify Stockley Severity & Action Rating): Identify whether the pair is Contraindicated (Do NOT co-administer; e.g., ACEi + ARNI within 36h, Meropenem + Valproate, Linezolid + SSRI) vs Major Action Required (Empiric dose reduction or therapeutic substitution).',
+      'Step 2 (Evaluate Onset & Offset Kinetics): Enzyme inhibition (e.g., Fluconazole/Metronidazole on Warfarin) begins within 24–72h, whereas long-half-life inhibitors (Amiodarone t1/2 ~40–55 days) or enzyme induction (Rifampin/Carbamazepine) persist for weeks after drug discontinuation.',
+      'Step 3 (Verify Patient-Specific Amplifiers): Check renal function (CrCl <30–50 mL/min amplifies P-gp/CYP3A4 interactions and hyperkalemia), baseline electrolytes (K+ >5.0, Mg2+ <2.0), and QTc interval (>470–500 ms).',
+      'Step 4 (Implement Actionable Clinical Workaround): Substitute non-interacting congener (e.g., Pantoprazole instead of Omeprazole with Clopidogrel; Cefepime instead of Pip/Tazo with Vancomycin; Pravastatin/Rosuvastatin instead of Simvastatin with Amlodipine/Amiodarone) or apply strict TDM/dose reduction.'
+    ],
+    algorithmStepsAr: [
+      'الخطوة 1 (تحديد تصنيف Stockley الإكلينيكي): ميّز بين التداخلات الممنوعة قطعياً (Contraindicated مثل ACEi+ARNI، Meropenem+Valproate، Linezolid+SSRI) والتداخلات الكبرى التي تتطلب تعديل الجرعة أو استبدال الدواء.',
+      'الخطوة 2 (مراعاة الحركية الزمنية لبدء وانتهاء التداخل): التثبيط الإنزيمي يبدأ خلال 24-72 ساعة، بينما الأدوية ذات العمر النصفي الطويل (مثل Amiodarone بنصف عمر 50 يوماً) يستمر تداخلها لأسابيع بعد إيقافها.',
+      'الخطوة 3 (فحص عوامل المضاعفة الخاصة بالمريض): راجع وظائف الكلى (CrCl < 30 يضاعف تداخلات P-gp وفرط البوتاسيوم)، الكهارل (نقص K+ أو Mg2+ يفاقم سمية Digoxin وتطاول QTc)، وعمر المريض.',
+      'الخطوة 4 (تطبيق البديل الآمن أو التعديل الاستباقي للجرعة): استبدل الدواء ببديل لا يتداخل (مثل Pantoprazole بدلاً من Omeprazole مع Clopidogrel؛ أو Cefepime بدلاً من Pip/Tazo مع Vancomycin) أو خفّض الجرعة استباقياً مع مراقبة TDM/INR.'
+    ],
+    quickTables: [
+      {
+        title: "Stockley's High-Alert Hospital Drug Interactions & Action Matrix (Drive ID: 1eg07NXxWYgJq0NxLf0Vim1JlV7KTu16S)",
+        titleAr: 'جدول مرجع Stockley لأخطر التعارضات الدوائية في المستشفيات والإجراء الإكلينيكي المعتمد',
+        headers: ['Interacting Pair', 'Stockley Severity', 'Primary PK/PD Mechanism', 'Mandatory Clinical Action'],
+        headersAr: ['الثنائية الدوائية', 'تصنيف الخطورة', 'الآلية الحركية / الديناميكية', 'الإجراء الصيدلاني الإلزامي'],
+        rows: [
+          ['ACEi (Lisinopril/Ramipril) + Entresto (ARNI)', 'Contraindicated', 'Dual ACE + Neprilysin inhibition -> severe Bradykinin accumulation & fatal Angioedema', 'Enforce strict 36-hour washout period after last ACEi dose before starting ARNI'],
+          ['Meropenem / Ertapenem + Valproic Acid', 'Contraindicated', 'Inhibition of valproate glucuronide acylpeptide hydrolase -> 60–90% drop in Valproate in 24h', 'Avoid combination; switch to Levetiracetam or use Cefepime/Aztreonam'],
+          ['Warfarin + Amiodarone / Fluconazole / Metronidazole', 'Major (Reduce Dose)', 'Potent CYP2C9 inhibition blocks S-warfarin clearance -> rapid INR surge & major bleeding', 'Reduce Warfarin dose empirically by 30–50% immediately and check INR in 3–5 days'],
+          ['Clopidogrel + Omeprazole / Esomeprazole', 'Major (Switch PPI)', 'CYP2C19 inhibition blocks conversion of Clopidogrel prodrug to active thiol -> stent thrombosis', 'Switch PPI to Pantoprazole 40 mg OD or Famotidine'],
+          ['Vancomycin + Piperacillin/Tazobactam', 'Major (Avoid/TDM)', 'Synergistic proximal tubular toxicity & OAT1/OAT3 competition -> 2-to-3x AKI incidence', 'Prefer Vancomycin + Cefepime; enforce AUC24/MIC 400–600 TDM & daily SCr'],
+          ['Digoxin + Amiodarone / Verapamil / Clarithromycin', 'Major (Halve Dose)', 'P-gp efflux inhibition in gut & renal tubules -> doubles serum Digoxin concentration', 'Reduce Digoxin dose by 50% upon starting inhibitor; target level 0.5–0.9 ng/mL'],
+          ['Linezolid + SSRI / SNRI / Fentanyl / Tramadol', 'Contraindicated', 'Reversible MAO-A inhibition + serotonergic agent -> life-threatening Serotonin Syndrome', 'Hold serotonergic agent or substitute Linezolid with Vancomycin / Daptomycin'],
+          ['Simvastatin / Atorvastatin + Clarithromycin / Amlodipine', 'Contraindicated / Major', 'CYP3A4 & OATP1B1 inhibition -> massive statin AUC rise & Rhabdomyolysis', 'Hold statin during Clarithromycin; cap Simvastatin at <=20 mg/day with Amlodipine']
+        ],
+        rowsAr: [
+          ['ACEi (Lisinopril/Ramipril) + Entresto (ARNI)', 'ممنوع قطعياً (Contraindicated)', 'تثبيط مزدوج لـ ACE و Neprilysin يؤدي لتراكم Bradykinin ووذمة وعائية قاتلة (Angioedema)', 'إلزامية فترة غسيل (36-hour Washout) بعد آخر جرعة ACEi قبل بدء Entresto'],
+          ['Meropenem / Imipenem + Valproic Acid', 'ممنوع قطعياً (Contraindicated)', 'تثبيط إنزيم Acylpeptide Hydrolase يؤدي لهبوط مستوى الفالبروات بنسبة 60-90% خلال 24 ساعة ونوبات صرع', 'يُمنع الجمع؛ استبدل الفالبروات بـ Levetiracetam أو استخدم Cefepime'],
+          ['Warfarin + Amiodarone / Fluconazole / Metronidazole', 'خطير (تخفيض الجرعة)', 'تثبيط قوي لإنزيم CYP2C9 يمنع استقلاب S-Warfarin فيرفع INR بشكل حاد ويسبب نزيفاً', 'خفّض جرعة Warfarin استباقياً بنسبة 30-50% عند البدء وافحص INR خلال 3-5 أيام'],
+          ['Clopidogrel + Omeprazole / Esomeprazole', 'خطير (استبدال PPI)', 'تثبيط CYP2C19 يمنع تحول Clopidogrel إلى شكله الفعال مما يرفع خطر تخثر الدعامة القلبية', 'استبدل Omeprazole/Esomeprazole بـ Pantoprazole 40 mg أو Famotidine'],
+          ['Vancomycin + Piperacillin/Tazobactam', 'خطير (تجنب / TDM)', 'سمية أنبوبية كلوية متآزرة تضاعف خطر القصور الكلوي الحاد (AKI) بـ 2-3 أضعاف', 'استبدل Pip/Tazo بـ Cefepime؛ راقب SCr يومياً وطبّق AUC24/MIC 400-600'],
+          ['Digoxin + Amiodarone / Verapamil / Clarithromycin', 'خطير (نصف الجرعة)', 'تثبيط مضخة P-gp في الأمعاء والكلى يرفع مستوى Digoxin للضعف ويسبب سمية قلبية', 'خفّض جرعة Digoxin بنسبة 50% فوراً وحافظ على المستوى المصلي 0.5-0.9 ng/mL'],
+          ['Linezolid + SSRI / SNRI / Fentanyl / Tramadol', 'ممنوع قطعياً (Contraindicated)', 'تثبيط MAO-A مع أدوية رافعة للسيروتونين يسبب متلازمة السيروتونين (Serotonin Syndrome)', 'أوقف الدواء السيروتونيني أو استبدل Linezolid بـ Vancomycin أو Daptomycin'],
+          ['Simvastatin / Atorvastatin + Clarithromycin / Amlodipine', 'ممنوع / خطير', 'تثبيط CYP3A4 و OATP1B1 يرفع تركيز الستاتين بشدة ويسبب انحلال العضلات (Rhabdomyolysis)', 'أوقف الستاتين مؤقتاً أثناء شوط Clarithromycin؛ لا تتجاوز Simvastatin 20 mg مع Amlodipine']
+        ]
+      }
+    ],
+    keyRecommendations: [
+      'Always screen both active inpatient medications (MAR) and home medications (BPMH) against Stockley’s DDI rules before verifying any new order.',
+      'When a CYP2C9 or P-gp inhibitor is started in a patient on a narrow therapeutic index drug (Warfarin, Digoxin, Tacrolimus), perform preemptive dose reduction rather than waiting for toxicity to occur.',
+      'For oral Fluoroquinolones (Ciprofloxacin, Levofloxacin) and Tetracyclines, enforce a 2-hour before or 4–6-hour after administration window around oral Calcium, Magnesium, Aluminum, Iron, or Enteral Tube Feeds.'
+    ],
+    keyRecommendationsAr: [
+      'افحص دائماً قائمة الأدوية النشطة في المستشفى (MAR) والأدوية المنزلية (BPMH) وفق قواعد Stockley قبل اعتماد أي وصفة جديدة.',
+      'عند إضافة مثبط إنزيمي قوي (CYP2C9 أو P-gp) لمريض يتناول دواءً ذا هامش علاجي ضيق (Warfarin, Digoxin, Tacrolimus)، قم بتخفيض الجرعة استباقياً ولا تنتظر ظهور علامات التسمم.',
+      'افصل إعطاء الكينولونات الفموية (Ciprofloxacin, Levofloxacin) والتتراسيكلينات بساعتين قبل أو 4-6 ساعات بعد أملاح الكالسيوم، المغنيسيوم، الحديد، أو التغذية الأنبوبية.'
+    ],
+    clinicalPearls: [
+      'The interaction between Carbapenems and Valproic Acid cannot be overcome by simply increasing the Valproate dose — serum Valproate concentrations remain subtherapeutic even at doubled doses.',
+      'Apixaban and Rivaroxaban are dual substrates of CYP3A4 and P-glycoprotein: strong dual inhibitors (Ketoconazole, Itraconazole, Ritonavir) double DOAC exposure, whereas strong dual inducers (Rifampin, Carbamazepine, Phenytoin) reduce DOAC levels by >50% and cause stroke/VTE.'
+    ],
+    clinicalPearlsAr: [
+      'تداخل الكاربابينيمات (Meropenem) مع Valproic Acid لا يمكن التغلب عليه بزيادة جرعة الفالبروات؛ لأن المستوى المصلي يظل منخفضاً حتى مع مضاعفة الجرعة.',
+      'مضادات التخثر المباشرة (Apixaban / Rivaroxaban) تعتمد معاً على CYP3A4 و P-gp؛ لذا فإن المحرضات القوية (Rifampin, Carbamazepine, Phenytoin) تخفض تركيزها بأكثر من 50% وتسبب جلطات، والمثبطات المزدوجة القوية تضاعف خطر النزيف.'
+    ],
+    keywords: [
+      'stockley',
+      'stockleys',
+      'drug interactions',
+      'ddi',
+      '1eg07NXxWYgJq0NxLf0Vim1JlV7KTu16S',
+      'warfarin',
+      'amiodarone',
+      'clopidogrel',
+      'omeprazole',
+      'meropenem',
+      'valproate',
+      'linezolid',
+      'serotonin',
+      'vancomycin',
+      'piperacillin',
+      'digoxin',
+      'simvastatin',
+      'تداخلات',
+      'تعارضات',
+      'ستوكلي'
+    ],
+    sourceId: 'stockleys-drug-interactions',
+    sourceUrl: 'local://ref/chapter/stockleys-ddi-master',
+    evidenceLevel: "Stockley's Drug Interactions (13th Ed / Drive ID: 1eg07NXxWYgJq0NxLf0Vim1JlV7KTu16S)"
+  },
   // ==================== CLINICAL CASEBOOK & PATIENT WORKUP GUIDE ====================
   {
     id: 'casebook-ppcp-workup',
@@ -2313,6 +2443,14 @@ export function resolveLocalReference(uriOrId?: string): ResolvedLocalReference 
   } else if (normalized === 'hospital-compendium-protocols') {
     targetChapterId = 'hosp-iv-electrolytes-compendium';
     targetVerbatimId = 'hospital-compendium-protocols';
+  } else if (
+    normalized.startsWith('stockleys-') ||
+    normalized === 'stockleys-drug-interactions' ||
+    normalized.includes('1eg07NXxWYgJq0NxLf0Vim1JlV7KTu16S')
+  ) {
+    targetChapterId = 'stockleys-ddi-master';
+    targetVerbatimId =
+      normalized.startsWith('stockleys-ch') ? normalized : 'stockleys-ch1-anticoag-antiplatelet';
   }
 
   // 1. Direct chapter match by ID or sourceUrl
@@ -2350,6 +2488,12 @@ export function resolveLocalReference(uriOrId?: string): ResolvedLocalReference 
     } else if (raw.includes('1yYqokFGeNRAGcZMu5iCmERQn9w_PD1By') || raw.toLowerCase().includes('accp')) {
       matchedSource = PRIMARY_CLINICAL_REFERENCES.find(s => s.id === 'accp-2026-vol1-vol2') || null;
       targetVerbatimId = 'accp-v1-acs';
+    } else if (
+      raw.includes('1eg07NXxWYgJq0NxLf0Vim1JlV7KTu16S') ||
+      raw.toLowerCase().includes('stockley')
+    ) {
+      matchedSource = PRIMARY_CLINICAL_REFERENCES.find(s => s.id === 'stockleys-drug-interactions') || null;
+      targetVerbatimId = 'stockleys-ch1-anticoag-antiplatelet';
     }
   }
 

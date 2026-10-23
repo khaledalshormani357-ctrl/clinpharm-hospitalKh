@@ -108,6 +108,17 @@ export const KNOWN_DRIVE_BOOK_MAPPINGS: KnownDriveBookMapping[] = [
     matchKeywords: ['compendium', 'dosing', 'hospital', 'dilution', 'icu', 'stewardship'],
     defaultCategory: 'Hospital Dosing & IV Protocols',
     defaultCategoryAr: 'جرعات المستشفيات والتسريب الوريدي'
+  },
+  {
+    bookId: 'stockleys-drug-interactions',
+    defaultDriveId: '1eg07NXxWYgJq0NxLf0Vim1JlV7KTu16S',
+    title: "Stockley's Drug Interactions (Complete Clinical DDI Reference Database)",
+    titleAr: "مرجع ستوكلي للتداخلات والتعارضات الدوائية (Stockley's Drug Interactions — الكتاب الكامل)",
+    badge: "Stockley's Drug Interactions",
+    badgeAr: "مرجع Stockley's للتداخلات",
+    matchKeywords: ['stockley', 'interactions', 'drug interactions', 'ddi', 'baxter', 'preston'],
+    defaultCategory: 'Drug Interactions & Safety',
+    defaultCategoryAr: 'قاعدة بيانات التعارضات الدوائية (Stockley’s)'
   }
 ];
 

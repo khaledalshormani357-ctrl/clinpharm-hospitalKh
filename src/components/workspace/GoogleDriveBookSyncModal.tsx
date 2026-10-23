@@ -20,6 +20,15 @@ import {
   removeSyncedFullBook
 } from '../../lib/googleDrive/fullBookIdb';
 import {
+  OfflineVaultDiagnostics,
+  getOfflineVaultDiagnostics,
+  requestPersistentOfflineStorage,
+  downloadOfflinePdfFromVault,
+  verifyOfflineBookIntegrity,
+  formatStorageBytes,
+  subscribeOfflineNetworkStatus
+} from '../../lib/googleDrive/pdfOfflineStorageService';
+import {
   X,
   CloudDownload,
   HardDrive,
@@ -33,7 +42,12 @@ import {
   LogOut,
   AlertCircle,
   BookOpenCheck,
-  Link2
+  Link2,
+  ShieldCheck,
+  Download,
+  Wifi,
+  WifiOff,
+  Database
 } from 'lucide-react';
 import { User } from 'firebase/auth';
 
@@ -56,6 +70,10 @@ export function GoogleDriveBookSyncModal({
   const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);
 
   const [syncedBooks, setSyncedBooks] = useState<SyncedFullBookRecord[]>([]);
+  const [vaultDiag, setVaultDiag] = useState<OfflineVaultDiagnostics | null>(null);
+  const [isOnline, setIsOnline] = useState<boolean>(() =>
+    typeof navigator !== 'undefined' ? navigator.onLine : true
+  );
   const [driveFiles, setDriveFiles] = useState<DriveFileItem[]>([]);
   const [driveSearch, setDriveSearch] = useState<string>('');
   const [isLoadingDriveFiles, setIsLoadingDriveFiles] = useState<boolean>(false);
@@ -79,6 +97,13 @@ export function GoogleDriveBookSyncModal({
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  const refreshVaultDiagnostics = async () => {
+    const records = await hydrateSyncedFullBooks();
+    setSyncedBooks(records);
+    const diag = await getOfflineVaultDiagnostics();
+    setVaultDiag(diag);
+  };
+
   useEffect(() => {
     const unsubInit = initAuth(
       (u, t) => {
@@ -97,20 +122,22 @@ export function GoogleDriveBookSyncModal({
       setNeedsAuth(state.needsAuth);
     });
 
-    void hydrateSyncedFullBooks().then(records => {
-      setSyncedBooks(records);
+    const unsubNet = subscribeOfflineNetworkStatus(online => {
+      setIsOnline(online);
+      void refreshVaultDiagnostics();
     });
 
+    void refreshVaultDiagnostics();
+
     const handleUpdated = () => {
-      void hydrateSyncedFullBooks().then(records => {
-        setSyncedBooks(records);
-      });
+      void refreshVaultDiagnostics();
     };
     window.addEventListener('clinpharm-full-books-updated', handleUpdated);
 
     return () => {
       unsubInit();
       unsubState();
+      unsubNet();
       window.removeEventListener('clinpharm-full-books-updated', handleUpdated);
     };
   }, []);
@@ -294,11 +321,51 @@ export function GoogleDriveBookSyncModal({
   const handleConfirmDeleteLocalCache = async (bookId: string) => {
     await removeSyncedFullBook(bookId);
     setConfirmDeleteBookId(null);
+    await refreshVaultDiagnostics();
     setSuccessMessage(
       lang === 'ar'
         ? 'تم مسح النسخة المخزنة محلياً من المتصفح (IndexedDB).'
         : 'Removed cached full book from browser IndexedDB storage.'
     );
+  };
+
+  const handleEnablePersistentStorage = async () => {
+    const granted = await requestPersistentOfflineStorage();
+    await refreshVaultDiagnostics();
+    if (granted) {
+      setSuccessMessage(
+        lang === 'ar'
+          ? 'تم تفعيل حماية التخزين الدائم (Persistent IndexedDB Storage)؛ لن يقوم المتصفح بمسح كتبك الطبية تلقائياً أبداً.'
+          : 'Persistent IndexedDB storage granted! Your cached medical PDFs are protected from automatic browser eviction.'
+      );
+    } else {
+      setErrorMessage(
+        lang === 'ar'
+          ? 'المتصفح يدير التخزين المحلي تلقائياً؛ كتبك محفوظة في IndexedDB وتعمل بدون إنترنت.'
+          : 'Browser manages storage persistence automatically; your books remain cached in IndexedDB for offline access.'
+      );
+    }
+  };
+
+  const handleVerifyIntegrity = async (bookId: string) => {
+    setErrorMessage(null);
+    const res = await verifyOfflineBookIntegrity(bookId);
+    if (res.isHealthy) {
+      setSuccessMessage(lang === 'ar' ? res.messageAr : res.messageEn);
+    } else {
+      setErrorMessage(lang === 'ar' ? res.messageAr : res.messageEn);
+    }
+  };
+
+  const handleDownloadOfflinePdf = async (bookId: string) => {
+    const ok = await downloadOfflinePdfFromVault(bookId);
+    if (!ok) {
+      setErrorMessage(
+        lang === 'ar'
+          ? 'ملف الـ PDF الثنائي غير متوفر في الذاكرة المحلية لهذا المرجع؛ أعد مزامنته لحفظ النسخة الثنائية.'
+          : 'Binary PDF is not stored locally for this reference; re-sync to store the raw PDF.'
+      );
+    }
   };
 
   return (
@@ -313,13 +380,13 @@ export function GoogleDriveBookSyncModal({
             <div>
               <h2 className="font-bold text-sm sm:text-base">
                 {lang === 'ar'
-                  ? 'ربط Google Drive واستيراد الكتب المرجعية الكاملة (100% من الصفحات حرفياً)'
-                  : 'Google Drive Connection & 100% Full-Book PDF Verbatim Indexer'}
+                  ? 'ربط Google Drive وخزنة التخزين المحلي IndexedDB للمراجع الطبية (تعمل 100% بدون إنترنت)'
+                  : 'Google Drive Sync & Local IndexedDB Offline Medical PDF Vault'}
               </h2>
               <p className="text-xs text-slate-400">
                 {lang === 'ar'
-                  ? 'يقرأ ويستخرج كل صفحة وكل فصل من ملفات الـ PDF في Google Drive دون أي اختصار أو ترجمة ويحفظها محلياً في IndexedDB'
-                  : 'Extracts and indexes 100% of pages and chapters verbatim from your Google Drive PDFs and persists them in IndexedDB'}
+                  ? 'يخزن ملفات الـ PDF المرفوعة من Google Drive محلياً في IndexedDB مع فهرسة 100% من الصفحات للوصول الفوري بدون إنترنت'
+                  : 'Caches full Google Drive PDF binaries and 100% of verbatim pages in browser IndexedDB for instant offline access'}
               </p>
             </div>
           </div>
@@ -411,6 +478,132 @@ export function GoogleDriveBookSyncModal({
 
         {/* Body Content */}
         <div className="flex-1 overflow-y-auto p-5 space-y-6">
+          {/* Section 0: IndexedDB Offline PDF Storage Vault Status & Quota Diagnostics */}
+          <div className="p-4 rounded-2xl bg-gradient-to-r from-teal-950/90 via-slate-900 to-slate-900 text-white border border-teal-800/60 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <Database className="w-5 h-5 text-teal-400 shrink-0" />
+                <div>
+                  <div className="font-bold text-xs sm:text-sm flex items-center gap-2 flex-wrap">
+                    <span>
+                      {lang === 'ar'
+                        ? 'وحدة خدمة التخزين المحلي IndexedDB للمراجع الطبية (Offline PDF Vault)'
+                        : 'Browser IndexedDB Offline Medical PDF Storage Service'}
+                    </span>
+                    <span
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        isOnline
+                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/30'
+                          : 'bg-amber-500/20 text-amber-300 border border-amber-400/30'
+                      }`}
+                    >
+                      {isOnline ? (
+                        <>
+                          <Wifi className="w-3 h-3" />
+                          <span>
+                            {lang === 'ar'
+                              ? 'متصل بالإنترنت (جاهز للمزامنة)'
+                              : 'Online (Ready to Sync)'}
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <WifiOff className="w-3 h-3" />
+                          <span>
+                            {lang === 'ar'
+                              ? 'وضع عدم الاتصال (قراءة فورية من IndexedDB)'
+                              : 'Offline Mode (Serving from IndexedDB)'}
+                          </span>
+                        </>
+                      )}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-300 mt-0.5">
+                    {lang === 'ar'
+                      ? 'يتم حفظ النسخة الثنائية الكاملة لملفات الـ PDF مع فهرس الصفحات في متصفحك لتعمل فوراً في المستشفى والأقسام بدون حاجة للإنترنت.'
+                      : 'Raw PDF binaries and full verbatim page indexes are stored in IndexedDB for zero-latency offline clinical access.'}
+                  </p>
+                </div>
+              </div>
+
+              {!vaultDiag?.isPersistentStorageGranted ? (
+                <button
+                  type="button"
+                  onClick={() => void handleEnablePersistentStorage()}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-teal-500/20 hover:bg-teal-500/30 text-teal-200 border border-teal-400/40 text-xs font-bold cursor-pointer"
+                >
+                  <ShieldCheck className="w-4 h-4 text-teal-300" />
+                  <span>
+                    {lang === 'ar'
+                      ? 'تفعيل التخزين الدائم غير القابل للمسح'
+                      : 'Lock Persistent Offline Storage'}
+                  </span>
+                </button>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-xs font-bold">
+                  <ShieldCheck className="w-4 h-4" />
+                  <span>
+                    {lang === 'ar'
+                      ? 'التخزين الدائم محمي ومُفعّل (Persistent Storage)'
+                      : 'Persistent Offline Storage Protected'}
+                  </span>
+                </span>
+              )}
+            </div>
+
+            {vaultDiag && (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1 text-xs">
+                <div className="p-2.5 rounded-xl bg-slate-800/80 border border-slate-700/80">
+                  <div className="text-[10px] text-slate-400">
+                    {lang === 'ar' ? 'الكتب المخزنة أوفلاين' : 'Cached Offline Books'}
+                  </div>
+                  <div className="font-mono font-bold text-sm text-teal-300 mt-0.5">
+                    {vaultDiag.totalBooksCached}{' '}
+                    <span className="text-[11px] font-normal text-slate-400">
+                      ({vaultDiag.totalBinaryPdfsCached} PDF)
+                    </span>
+                  </div>
+                </div>
+
+                <div className="p-2.5 rounded-xl bg-slate-800/80 border border-slate-700/80">
+                  <div className="text-[10px] text-slate-400">
+                    {lang === 'ar' ? 'إجمالي الصفحات المفهرسة' : 'Total Cached Pages'}
+                  </div>
+                  <div className="font-mono font-bold text-sm text-emerald-300 mt-0.5">
+                    {vaultDiag.totalPagesCached.toLocaleString()}{' '}
+                    <span className="text-[11px] font-normal text-slate-400">
+                      ({vaultDiag.totalChaptersCached} {lang === 'ar' ? 'فصلاً' : 'Ch'})
+                    </span>
+                  </div>
+                </div>
+
+                <div className="p-2.5 rounded-xl bg-slate-800/80 border border-slate-700/80">
+                  <div className="text-[10px] text-slate-400">
+                    {lang === 'ar' ? 'حجم ملفات الـ PDF في IndexedDB' : 'IndexedDB Vault Size'}
+                  </div>
+                  <div className="font-mono font-bold text-sm text-amber-300 mt-0.5">
+                    {formatStorageBytes(vaultDiag.totalVaultBytes)}
+                  </div>
+                </div>
+
+                <div className="p-2.5 rounded-xl bg-slate-800/80 border border-slate-700/80">
+                  <div className="text-[10px] text-slate-400">
+                    {lang === 'ar' ? 'سعة تخزين المتصفح المتاحة' : 'Browser Storage Quota'}
+                  </div>
+                  <div className="font-mono font-bold text-sm text-sky-300 mt-0.5">
+                    {vaultDiag.browserQuotaBytes
+                      ? `${formatStorageBytes(vaultDiag.browserUsageBytes || 0)} / ${formatStorageBytes(
+                          vaultDiag.browserQuotaBytes
+                        )}`
+                      : lang === 'ar'
+                      ? 'متاح بالكامل'
+                      : 'Available'}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Section 1: Google Drive Account Connection Bar + Direct Local PDF Upload */}
           <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-4">
             <div className="space-y-1">
@@ -538,8 +731,8 @@ export function GoogleDriveBookSyncModal({
                 <BookOpenCheck className="w-4 h-4 text-teal-600" />
                 <span>
                   {lang === 'ar'
-                    ? '2. المراجع السريرية الستة المعتمدة (ربط وفهرسة الكتب الكاملة)'
-                    : '2. Core Clinical Reference Textbooks (Full-Book PDF Mapping & Status)'}
+                    ? '2. المراجع السريرية الستة المعتمدة (حالة التخزين المحلي بدون إنترنت IndexedDB)'
+                    : '2. Core Clinical Reference Textbooks (IndexedDB Offline PDF Cache & Sync)'}
                 </span>
               </h3>
               <span className="text-[11px] font-mono text-slate-500">
@@ -550,6 +743,7 @@ export function GoogleDriveBookSyncModal({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {KNOWN_DRIVE_BOOK_MAPPINGS.map(mapping => {
                 const syncedRecord = syncedBooks.find(s => s.bookId === mapping.bookId);
+                const vaultBook = vaultDiag?.books.find(b => b.bookId === mapping.bookId);
                 const driveInputVal = customDriveIds[mapping.bookId] || '';
 
                 return (
@@ -575,7 +769,7 @@ export function GoogleDriveBookSyncModal({
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 text-[10px] font-bold font-mono shrink-0">
                           <CheckCircle2 className="w-3 h-3" />
                           <span>
-                            {syncedRecord.totalPages} {lang === 'ar' ? 'صفحة كاملة' : 'Pages Indexed'}
+                            {syncedRecord.totalPages} {lang === 'ar' ? 'صفحة أوفلاين' : 'Pages Offline'}
                           </span>
                         </span>
                       ) : (
@@ -589,17 +783,39 @@ export function GoogleDriveBookSyncModal({
                       <div className="text-[11px] text-emerald-800 dark:text-emerald-300 font-mono bg-emerald-100/60 dark:bg-emerald-950/50 px-2.5 py-1.5 rounded-lg flex items-center justify-between gap-2">
                         <span className="truncate">
                           ✓ {syncedRecord.fileName} • {syncedRecord.totalPages} pp •{' '}
-                          {syncedRecord.totalChapters} Ch •{' '}
-                          {(syncedRecord.totalCharacters / 1000).toFixed(0)}k chars
+                          {vaultBook?.hasBinaryPdf
+                            ? `${formatStorageBytes(vaultBook.binaryByteSize)} PDF`
+                            : `${(syncedRecord.totalCharacters / 1000).toFixed(0)}k chars`}
                         </span>
-                        <button
-                          type="button"
-                          onClick={() => setConfirmDeleteBookId(mapping.bookId)}
-                          className="text-rose-600 hover:text-rose-500 p-1 shrink-0 cursor-pointer"
-                          title="Remove local cached copy"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        <div className="flex items-center gap-1 shrink-0">
+                          {vaultBook?.hasBinaryPdf && (
+                            <button
+                              type="button"
+                              onClick={() => void handleDownloadOfflinePdf(mapping.bookId)}
+                              className="px-1.5 py-0.5 rounded bg-teal-600 hover:bg-teal-500 text-white text-[10px] font-sans font-bold inline-flex items-center gap-1 cursor-pointer"
+                              title="Download cached PDF from IndexedDB without internet"
+                            >
+                              <Download className="w-3 h-3" />
+                              <span>PDF</span>
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => void handleVerifyIntegrity(mapping.bookId)}
+                            className="px-1.5 py-0.5 rounded bg-emerald-700/20 hover:bg-emerald-700/30 text-emerald-800 dark:text-emerald-200 text-[10px] font-sans font-bold cursor-pointer"
+                            title="Verify offline IndexedDB integrity"
+                          >
+                            {lang === 'ar' ? 'فحص' : 'Verify'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteBookId(mapping.bookId)}
+                            className="text-rose-600 hover:text-rose-500 p-1 shrink-0 cursor-pointer"
+                            title="Remove local cached copy"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
                     )}
 

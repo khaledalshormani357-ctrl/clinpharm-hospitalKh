@@ -4,7 +4,8 @@ import {
   ClinicalIntervention,
   ReconciliationDiscrepancy,
   Medication,
-  InterventionStatus
+  InterventionStatus,
+  LabResult
 } from './types/clinical';
 import { INITIAL_PATIENTS, INITIAL_INTERVENTIONS, INITIAL_DISCREPANCIES } from './lib/mockData';
 import { DashboardLayout } from './components/DashboardLayout';
@@ -186,6 +187,20 @@ export default function App() {
     );
   };
 
+  const handleUpdatePatientLabs = (patientId: string, updatedLabs: LabResult) => {
+    setPatients(prev =>
+      prev.map(p => {
+        if (p.id === patientId) {
+          return {
+            ...p,
+            labs: updatedLabs
+          };
+        }
+        return p;
+      })
+    );
+  };
+
   const handleAddIntervention = (newInt: ClinicalIntervention) => {
     setInterventions(prev => [newInt, ...prev]);
   };
@@ -236,6 +251,7 @@ export default function App() {
       discrepancies={discrepancies}
       onAddPatient={handleAddPatient}
       onAddMedication={handleAddMedication}
+      onUpdatePatientLabs={handleUpdatePatientLabs}
       onAddIntervention={handleAddIntervention}
       onUpdateInterventionStatus={handleUpdateInterventionStatus}
       onAddDiscrepancy={handleAddDiscrepancy}

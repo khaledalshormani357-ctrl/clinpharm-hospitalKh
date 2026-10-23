@@ -14,7 +14,8 @@ export type MedicalSystemCategory =
   | 'Gastroenterology & Hepatology'
   | 'Endocrinology & Metabolism'
   | 'Clinical Methodology & PPCP'
-  | 'Hospital Dosing & IV Protocols';
+  | 'Hospital Dosing & IV Protocols'
+  | 'Drug Interactions & Safety';
 
 export interface VerbatimSection {
   id: string;

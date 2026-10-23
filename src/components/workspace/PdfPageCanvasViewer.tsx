@@ -1,6 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
 import { getSyncedPdfBytes } from '../../lib/googleDrive/fullBookIdb';
-import { ChevronLeft, ChevronRight, ZoomIn, ZoomOut, FileText } from 'lucide-react';
+import {
+  downloadOfflinePdfFromVault,
+  formatStorageBytes
+} from '../../lib/googleDrive/pdfOfflineStorageService';
+import {
+  ChevronLeft,
+  ChevronRight,
+  ZoomIn,
+  ZoomOut,
+  FileText,
+  Download,
+  HardDrive
+} from 'lucide-react';
 import { Language } from '../../types/clinical';
 
 interface Props {
@@ -19,10 +31,14 @@ export function PdfPageCanvasViewer({
   onPageChange
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  // Cache loaded pdfDoc per bookId so turning pages offline is instantaneous without re-parsing
+  const pdfDocCacheRef = useRef<{ bookId: string; doc: any; byteLength: number } | null>(null);
+
   const [currentPage, setCurrentPage] = useState<number>(initialPage);
   const [pageInput, setPageInput] = useState<string>(String(initialPage));
   const [scale, setScale] = useState<number>(1.35);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [cachedByteSize, setCachedByteSize] = useState<number>(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   useEffect(() => {
@@ -39,35 +55,51 @@ export function PdfPageCanvasViewer({
       setIsLoading(true);
       setErrorMsg(null);
       try {
-        const pdfBytes = await getSyncedPdfBytes(bookId);
-        if (!pdfBytes) {
-          if (!isCancelled) {
-            setErrorMsg(
-              lang === 'ar'
-                ? 'لم يتم العثور على ملف الـ PDF الثنائي في التخزين المحلي لهذا المرجع.'
-                : 'Binary PDF data is not stored for this book.'
-            );
-            setIsLoading(false);
+        let pdfDoc: any = null;
+
+        if (pdfDocCacheRef.current && pdfDocCacheRef.current.bookId === bookId) {
+          pdfDoc = pdfDocCacheRef.current.doc;
+          setCachedByteSize(pdfDocCacheRef.current.byteLength);
+        } else {
+          const pdfBytes = await getSyncedPdfBytes(bookId);
+          if (!pdfBytes) {
+            if (!isCancelled) {
+              setErrorMsg(
+                lang === 'ar'
+                  ? 'لم يتم العثور على ملف الـ PDF الثنائي في التخزين المحلي (IndexedDB) لهذا المرجع.'
+                  : 'Binary PDF data is not stored in IndexedDB for this book.'
+              );
+              setIsLoading(false);
+            }
+            return;
           }
-          return;
+
+          const pdfjsLib = await import('pdfjs-dist');
+          try {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+              'pdfjs-dist/build/pdf.worker.min.mjs',
+              import.meta.url
+            ).toString();
+          } catch {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+          }
+
+          const loadingTask = pdfjsLib.getDocument({
+            data: new Uint8Array(pdfBytes.slice(0)),
+            useSystemFonts: true
+          });
+          pdfDoc = await loadingTask.promise;
+          pdfDocCacheRef.current = {
+            bookId,
+            doc: pdfDoc,
+            byteLength: pdfBytes.byteLength
+          };
+          if (!isCancelled) {
+            setCachedByteSize(pdfBytes.byteLength);
+          }
         }
 
-        const pdfjsLib = await import('pdfjs-dist');
-        try {
-          pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-            'pdfjs-dist/build/pdf.worker.min.mjs',
-            import.meta.url
-          ).toString();
-        } catch {
-          pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
-        }
-
-        const loadingTask = pdfjsLib.getDocument({
-          data: new Uint8Array(pdfBytes.slice(0)),
-          useSystemFonts: true
-        });
-        const pdfDoc = await loadingTask.promise;
-        if (isCancelled) return;
+        if (isCancelled || !pdfDoc) return;
 
         const safePage = Math.max(1, Math.min(currentPage, pdfDoc.numPages));
         const page = await pdfDoc.getPage(safePage);
@@ -120,8 +152,16 @@ export function PdfPageCanvasViewer({
         <div className="flex items-center gap-2">
           <FileText className="w-4 h-4 text-teal-400" />
           <span className="font-bold">
-            {lang === 'ar' ? 'عارض صفحات الـ PDF الأصلي' : 'Original PDF Page Renderer'}
+            {lang === 'ar'
+              ? 'عارض صفحات الـ PDF الأصلي (محفوظ محلياً في IndexedDB بدون إنترنت)'
+              : 'Original PDF Page Renderer (Cached Offline in IndexedDB)'}
           </span>
+          {cachedByteSize > 0 && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-mono text-[10px]">
+              <HardDrive className="w-3 h-3" />
+              <span>{formatStorageBytes(cachedByteSize)}</span>
+            </span>
+          )}
         </div>
 
         {/* Page Navigation */}
@@ -163,7 +203,7 @@ export function PdfPageCanvasViewer({
           </button>
         </div>
 
-        {/* Zoom Controls */}
+        {/* Zoom Controls + Direct Offline PDF Download */}
         <div className="flex items-center gap-1.5 font-mono">
           <button
             type="button"
@@ -182,6 +222,18 @@ export function PdfPageCanvasViewer({
           >
             <ZoomIn className="w-3.5 h-3.5" />
           </button>
+
+          {cachedByteSize > 0 && (
+            <button
+              type="button"
+              onClick={() => void downloadOfflinePdfFromVault(bookId)}
+              className="ml-1 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-500 text-white font-sans font-bold text-[11px] cursor-pointer"
+              title="Download full PDF from IndexedDB offline storage"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>{lang === 'ar' ? 'تنزيل PDF أوفلاين' : 'Save PDF'}</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -196,8 +248,8 @@ export function PdfPageCanvasViewer({
             {isLoading && (
               <div className="absolute inset-0 flex items-center justify-center bg-slate-900/60 text-teal-300 text-xs font-bold rounded-lg">
                 {lang === 'ar'
-                  ? `جاري رسم الصفحة ${currentPage} من ${totalPages}...`
-                  : `Rendering PDF Page ${currentPage} of ${totalPages}...`}
+                  ? `جاري رسم الصفحة ${currentPage} من ${totalPages} من الذاكرة المحلية...`
+                  : `Rendering PDF Page ${currentPage} of ${totalPages} from IndexedDB...`}
               </div>
             )}
             <canvas
@@ -210,3 +262,4 @@ export function PdfPageCanvasViewer({
     </div>
   );
 }
+
