@@ -27,13 +27,25 @@ interface CopilotChatRequestBody {
 async function startServer() {
   const app = express();
 
-  // Enable CORS on all API routes so GitHub Pages and Android APK clients can connect seamlessly
+  // CORS is a browser boundary, not authentication. Configure explicit web origins at runtime.
+  const configuredOrigins = (process.env.CORS_ALLOWED_ORIGINS || '')
+    .split(',')
+    .map(origin => origin.trim())
+    .filter(Boolean);
   app.use('/api', (req, res, next) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    res.setHeader('Access-Control-Expose-Headers', 'X-Drive-Filename, Content-Length');
+    const origin = req.headers.origin;
+    if (origin && configuredOrigins.includes(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      res.setHeader('Access-Control-Expose-Headers', 'X-Drive-Filename, Content-Length');
+    }
     if (req.method === 'OPTIONS') {
+      if (origin && !configuredOrigins.includes(origin)) {
+        res.status(403).end();
+        return;
+      }
       res.status(204).end();
       return;
     }
@@ -110,6 +122,42 @@ async function startServer() {
   }
 
   app.post('/api/copilot/chat', async (req, res) => {
+    // Fail closed unless this server can validate a real Supabase user access token.
+    const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+    const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+    const authHeader = req.headers.authorization || '';
+    const accessToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+    if (!supabaseUrl || !supabaseAnonKey) {
+      res.status(503).json({ error: 'Clinical copilot authentication is not configured.' });
+      return;
+    }
+    if (!accessToken || accessToken.length > 8192) {
+      res.status(401).json({ error: 'Sign in is required to use the clinical copilot.' });
+      return;
+    }
+    try {
+      const authResponse = await fetch(`${supabaseUrl.replace(/\\/+$/, '')}/auth/v1/user`, {
+        method: 'GET',
+        headers: {
+          apikey: supabaseAnonKey,
+          Authorization: `Bearer ${accessToken}`
+        },
+        signal: AbortSignal.timeout(5000)
+      });
+      if (!authResponse.ok) {
+        res.status(401).json({ error: 'Your session is invalid or expired. Please sign in again.' });
+        return;
+      }
+      const authenticatedUser = await authResponse.json() as { id?: string };
+      if (!authenticatedUser?.id) {
+        res.status(401).json({ error: 'Unable to verify your signed-in account.' });
+        return;
+      }
+    } catch {
+      res.status(503).json({ error: 'Authentication service is temporarily unavailable.' });
+      return;
+    }
+
     try {
       const {
         query,
