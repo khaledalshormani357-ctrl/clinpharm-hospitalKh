@@ -37,6 +37,12 @@ describe("security configuration regression checks", () => {
     expect(engine).not.toContain("Ward: ${currentPatient.ward}");
   });
 
+  it("does not send prior chat turns to remote copilot endpoints by default", () => {
+    const component = read("src/components/CopilotDialog.tsx");
+    expect(component).toContain("history: []");
+    expect(component).not.toContain("history: historyForApi");
+  });
+
   it("does not make APK release errors invisible or depend on artifact upload quota", () => {
     const workflow = read(".github/workflows/build-android-apk.yml");
     expect(workflow).not.toContain("actions/upload-artifact@v4");
