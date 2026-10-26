@@ -46,7 +46,7 @@ async function startServer() {
     const hasKey = Boolean(process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY);
     res.json({
       ok: true,
-      liveAiReady: hasKey,
+      liveAiConfigured: hasKey,
       hasApiKey: hasKey,
       model: 'gemini-3-flash-preview',
       mode: 'NotebookLM Strict Reference Grounding',
