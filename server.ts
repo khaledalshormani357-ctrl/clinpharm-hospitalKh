@@ -59,7 +59,6 @@ async function startServer() {
     res.json({
       ok: true,
       liveAiConfigured: hasKey,
-      hasApiKey: hasKey,
       model: 'gemini-3-flash-preview',
       mode: 'NotebookLM Strict Reference Grounding',
       libraryBooksCount: 7,
@@ -162,7 +161,6 @@ async function startServer() {
       const {
         query,
         lang = 'ar',
-        history = [],
         patientContext = '',
         referenceContext = '',
         verbatimLibraryContext = ''
@@ -227,16 +225,11 @@ ${referenceContext || 'See numbered verbatim sources below.'}
 NUMBERED VERBATIM TEXTBOOK SOURCES ([SOURCE 1] .. [SOURCE N]):
 ${verbatimLibraryContext || 'All 7 reference books (47 chapters) indexed.'}`;
 
-      const contents = [
-        ...history.slice(-4).map(turn => ({
-          role: turn.role === 'assistant' ? 'model' : 'user',
-          parts: [{ text: turn.text }]
-        })),
-        {
-          role: 'user',
-          parts: [{ text: query.trim() }]
-        }
-      ];
+      // Keep each model request stateless; never forward prior chat turns.
+      const contents = [{
+        role: 'user',
+        parts: [{ text: query.trim() }]
+      }];
 
       const candidateModels = [
         'gemini-3-flash-preview',
