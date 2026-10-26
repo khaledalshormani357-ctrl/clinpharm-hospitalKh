@@ -115,7 +115,7 @@ Ask any clinical pharmacotherapy, renal/hepatic dosing, or Stockley’s DDI ques
 
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [liveAiStatus, setLiveAiStatus] = useState<'checking' | 'connected' | 'error'>('connected');
+  const [liveAiStatus, setLiveAiStatus] = useState<'checking' | 'configured' | 'connected' | 'grounded' | 'error'>('checking');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -136,7 +136,7 @@ Ask any clinical pharmacotherapy, renal/hepatic dosing, or Stockley’s DDI ques
         if (res.ok && ct.includes('application/json')) {
           const data = await res.json();
           if (data?.ok && !cancelled) {
-            setLiveAiStatus('connected');
+            setLiveAiStatus(data.liveAiConfigured ? 'configured' : 'grounded');
             return;
           }
         }
@@ -144,7 +144,7 @@ Ask any clinical pharmacotherapy, renal/hepatic dosing, or Stockley’s DDI ques
         // Ignore and keep grounded mode active
       }
       if (!cancelled) {
-        setLiveAiStatus('connected');
+        setLiveAiStatus('error');
       }
     };
 
@@ -209,6 +209,7 @@ Ask any clinical pharmacotherapy, renal/hepatic dosing, or Stockley’s DDI ques
       ];
 
       let replyText = '';
+      let usedLiveAi = false;
       let usedModelBadge = `NotebookLM Grounded AI • ${groundingBundle.numberedSources.length} Sources Cited`;
 
       // 2. Try Server Endpoints (Fast <2.5s Gemini 3 Flash with ThinkingLevel.LOW)
@@ -235,6 +236,7 @@ Ask any clinical pharmacotherapy, renal/hepatic dosing, or Stockley’s DDI ques
           const data = await response.json();
           if (response.ok && data?.text) {
             replyText = data.text;
+            usedLiveAi = data.liveAi === true;
             if (data.model) {
               usedModelBadge = `${data.model} • NotebookLM (${groundingBundle.numberedSources.length} Sources)`;
             }
@@ -294,6 +296,7 @@ CRITICAL RULES:
             const text = aiRes.text?.trim() || '';
             if (text) {
               replyText = text;
+              usedLiveAi = true;
               usedModelBadge = `${modelName} • NotebookLM Direct (${groundingBundle.numberedSources.length} Sources)`;
               break;
             }
@@ -315,7 +318,7 @@ CRITICAL RULES:
         usedModelBadge = `NotebookLM Verbatim Extractor • ${groundingBundle.numberedSources.length} Sources Cited`;
       }
 
-      setLiveAiStatus('connected');
+      setLiveAiStatus(usedLiveAi ? 'connected' : 'grounded');
 
       const sourceCitations = groundingBundle.numberedSources.map(src => ({
         title: `[${src.sourceIndex}] ${lang === 'ar' ? src.bookBadgeAr : src.bookBadge}: Ch.${src.chapterNumber} (${src.sectionNumber})`,
@@ -382,8 +385,10 @@ CRITICAL RULES:
                     className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${
                       liveAiStatus === 'connected'
                         ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/40'
-                        : liveAiStatus === 'checking'
+                        : liveAiStatus === 'checking' || liveAiStatus === 'configured'
                         ? 'bg-amber-500/20 text-amber-200 border-amber-400/40'
+                        : liveAiStatus === 'grounded'
+                        ? 'bg-sky-500/20 text-sky-200 border-sky-400/40'
                         : 'bg-rose-500/20 text-rose-200 border-rose-400/40'
                     }`}
                   >
@@ -391,15 +396,25 @@ CRITICAL RULES:
                       <>
                         <ShieldCheck className="w-3 h-3" />
                         <span>
-                          {lang === 'ar' ? 'إجابات موثقة 100% من المراجع' : '100% Source-Grounded'}
+                          {lang === 'ar' ? 'استجابة Gemini مباشرة' : 'Live Gemini response'}
                         </span>
                       </>
                     ) : liveAiStatus === 'checking' ? (
-                      <span>Connecting AI...</span>
+                      <span>{lang === 'ar' ? 'جارٍ التحقق من حالة الخادم...' : 'Checking server status...'}</span>
+                    ) : liveAiStatus === 'configured' ? (
+                      <>
+                        <AlertCircle className="w-3 h-3" />
+                        <span>{lang === 'ar' ? 'Gemini مهيأ؛ الاتصال غير مؤكد' : 'Gemini configured; connection unverified'}</span>
+                      </>
+                    ) : liveAiStatus === 'grounded' ? (
+                      <>
+                        <BookOpen className="w-3 h-3" />
+                        <span>{lang === 'ar' ? 'وضع المراجع المحلي' : 'Local reference mode'}</span>
+                      </>
                     ) : (
                       <>
                         <AlertCircle className="w-3 h-3" />
-                        <span>Check Server</span>
+                        <span>{lang === 'ar' ? 'تعذر التحقق من الخادم' : 'Server status unavailable'}</span>
                       </>
                     )}
                   </span>
