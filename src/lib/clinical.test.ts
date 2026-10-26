@@ -170,6 +170,15 @@ describe("evidence & finalization gate", () => {
     ).toBe(true);
   });
 
+  it("keeps the synthetic adult DKA benchmark aligned with the 2024 consensus thresholds", () => {
+    const dka = BENCHMARK_APP_TEST_CASES.find((testCase) => testCase.id === "test-case-dka-k");
+    expect(dka).toBeDefined();
+    expect(dka!.expectedAppFindingsEn.join(" ")).toContain("BG <250 mg/dL");
+    expect(dka!.expectedAppFindingsEn.join(" ")).toContain("0.05 units/kg/h");
+    expect(dka!.patientData.nameEn).toBe("Synthetic DKA Test Patient");
+    expect(dka!.patientData.mrn).toBe("TEST-DKA-01");
+  });
+
   it("validates all 7 accredited reference sources (including Casebook Guide & Stockley's DDI) and executes case simulation & test cases", () => {
     expect(PRIMARY_CLINICAL_REFERENCES.length).toBe(7);
     for (const ref of PRIMARY_CLINICAL_REFERENCES) {
