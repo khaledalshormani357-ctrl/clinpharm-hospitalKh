@@ -22,10 +22,14 @@ async function startServer() {
   const app = express();
 
   // CORS is a browser boundary, not authentication. Configure explicit web origins at runtime.
-  const configuredOrigins = (process.env.CORS_ALLOWED_ORIGINS || '')
-    .split(',')
-    .map(origin => origin.trim())
-    .filter(Boolean);
+  const nativeAppOrigins = ['https://localhost', 'http://localhost', 'capacitor://localhost'];
+  const configuredOrigins = [...new Set([
+    ...nativeAppOrigins,
+    ...(process.env.CORS_ALLOWED_ORIGINS || '')
+      .split(',')
+      .map(origin => origin.trim())
+      .filter(Boolean)
+  ])];
   app.use('/api', (req, res, next) => {
     const origin = req.headers.origin;
     if (origin && configuredOrigins.includes(origin)) {
