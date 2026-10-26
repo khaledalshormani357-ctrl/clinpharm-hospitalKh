@@ -133,7 +133,8 @@ async function startServer() {
       return;
     }
     try {
-      const authResponse = await fetch(`${supabaseUrl.replace(/\\/+$/, '')}/auth/v1/user`, {
+      const authUrl = new URL('/auth/v1/user', supabaseUrl).toString();
+      const authResponse = await fetch(authUrl, {
         method: 'GET',
         headers: {
           apikey: supabaseAnonKey,
@@ -164,8 +165,22 @@ async function startServer() {
         verbatimLibraryContext = ''
       } = (req.body || {}) as CopilotChatRequestBody;
 
-      if (!query || !query.trim()) {
+      if (typeof query !== 'string' || !query.trim()) {
         res.status(400).json({ error: 'Query is required' });
+        return;
+      }
+      if (query.length > 12000) {
+        res.status(413).json({ error: 'Clinical query is too long. Please shorten it and retry.' });
+        return;
+      }
+      const optionalContexts = [patientContext, referenceContext, verbatimLibraryContext];
+      if (optionalContexts.some(value => typeof value !== 'string')) {
+        res.status(400).json({ error: 'Clinical context fields must be text.' });
+        return;
+      }
+      const contextBytes = optionalContexts.reduce((total, value) => total + Buffer.byteLength(value, 'utf8'), 0);
+      if (contextBytes > 2 * 1024 * 1024) {
+        res.status(413).json({ error: 'Clinical reference context is too large. Reduce the selected context and retry.' });
         return;
       }
 
