@@ -423,11 +423,11 @@ export function buildNotebookLmGrounding(
     : null;
 
   const patientContext = currentPatient
-    ? `Active Inpatient: ${currentPatient.name} (${currentPatient.nameEn}), MRN: ${currentPatient.mrn}, Age: ${currentPatient.age}y, Sex: ${currentPatient.gender}, Weight: ${currentPatient.weight} kg, Height: ${currentPatient.height} cm, Ward: ${currentPatient.ward} (${currentPatient.room}), Clinical Status: ${currentPatient.status.toUpperCase()}.
+    ? `De-identified clinical case: Age: ${currentPatient.age}y, Sex: ${currentPatient.gender}, Weight: ${currentPatient.weight} kg, Height: ${currentPatient.height} cm, Clinical Status: ${currentPatient.status.toUpperCase()}.
 Diagnoses: ${currentPatient.diagnoses.join(' | ')}.
 Allergies: ${currentPatient.allergies.join(' | ') || 'NKDA'}.
 Key Labs: SCr ${currentPatient.labs.serumCreatinine} mg/dL, Cockcroft-Gault CrCl ${currentPatient.labs.crcl} mL/min, K+ ${currentPatient.labs.potassium} mEq/L, Na+ ${currentPatient.labs.sodium} mEq/L, WBC ${currentPatient.labs.wbc} x10^3/uL, Platelets ${currentPatient.labs.platelets} x10^3/uL, INR ${currentPatient.labs.inr ?? 'N/A'}, Lactate ${currentPatient.labs.lactate ?? 'N/A'} mmol/L, TDM: ${currentPatient.labs.tdmSummary || 'None'}. ${customLabsText}
-Active Inpatient MAR: ${currentPatient.activeMedications.map(m => `${m.genericName} (${m.name}) ${m.dose} ${m.route} ${m.frequency} [${m.indication}]`).join('; ') || 'None'}.
+Active Inpatient MAR: ${currentPatient.activeMedications.map(m => `${m.genericName} ${m.dose} ${m.route} ${m.frequency} [${m.indication}]`).join('; ') || 'None'}.
 Home Medications: ${currentPatient.homeMedications.map(m => `${m.genericName} ${m.dose} ${m.frequency}`).join('; ') || 'None'}.
 Case Engine Evidence Summary: ${patientSim?.readySoapPlanEn || ''}`
     : 'No active inpatient selected.';
