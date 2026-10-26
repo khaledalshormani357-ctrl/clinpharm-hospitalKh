@@ -244,62 +244,7 @@ Ask any clinical pharmacotherapy, renal/hepatic dosing, or Stockley’s DDI ques
         }
       }
 
-      // 3. Direct @google/genai SDK execution for standalone GitHub Pages / Android APK builds
-      if (!replyText && import.meta.env.VITE_GEMINI_API_KEY) {
-        const directModels = [
-          'gemini-3-flash-preview',
-          'gemini-3.8-flash',
-          'gemini-3.1-flash-lite',
-          'gemini-flash-latest'
-        ];
-
-        const sysPrompt = `You are "ClinPharm NotebookLM AI", a strict Source-Grounded Clinical Pharmacy Reference Analyst (modeled after Google NotebookLM).
-CRITICAL RULES:
-1. Answer ONLY from the provided NUMBERED ACCREDITED REFERENCE SOURCES ([SOURCE 1]..[SOURCE N]), MATCHED STOCKLEY'S DRUG INTERACTIONS, and ACTIVE INPATIENT CHART. Never make up or extrapolate unverified facts.
-2. Every clinical claim, drug dose, renal cutoff, or interaction mechanism MUST include an inline numbered citation like [1], [2], [Stockley's DDI].
-3. State exact numerical doses, infusion ceilings, washout periods, and TDM targets from the sources.
-4. End with a "${lang === 'ar' ? 'المراجع الموثّقة المقتبسة (Cited Reference Sources):' : 'Cited Reference Sources:'}" section listing [1], [2], ... with Book Title, Chapter, and Pages.
-5. Language: ${
-          lang === 'ar'
-            ? 'Respond in professional "Medical Mix" (Arabic clinical syntax with English drug names, enzymes, and medical terms).'
-            : 'Respond in authoritative clinical English.'
-        }`;
-
-        const fullPrompt = `ACTIVE INPATIENT CHART:\n${groundingBundle.patientContext}\n\nMATCHED STOCKLEY'S DDI:\n${groundingBundle.referenceContext}\n\nNUMBERED VERBATIM TEXTBOOK SOURCES:\n${groundingBundle.notebookSourcesContext}\n\nClinical Question:\n${currentInput}`;
-
-        for (const modelName of directModels) {
-          try {
-            const { GoogleGenAI, ThinkingLevel } = await import('@google/genai');
-            const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
-            const isGemini3 = modelName.startsWith('gemini-3');
-            const aiRes = await ai.models.generateContent({
-              model: modelName,
-              contents: fullPrompt,
-              config: {
-                systemInstruction: sysPrompt,
-                temperature: 0.1,
-                ...(isGemini3
-                  ? {
-                      thinkingConfig: {
-                        thinkingLevel: ThinkingLevel.LOW
-                      }
-                    }
-                  : {})
-              }
-            });
-            const text = aiRes.text?.trim() || '';
-            if (text) {
-              replyText = text;
-              usedLiveAi = true;
-              usedModelBadge = `${modelName} • NotebookLM Direct (${groundingBundle.numberedSources.length} Sources)`;
-              break;
-            }
-          } catch {
-            // Try next model in direct SDK fallback chain
-            continue;
-          }
-        }
-      }
+      // Gemini requests must go through the server; never use a client-side API key.
 
       // 4. Offline Verbatim NotebookLM Reference Extractor (100% query-specific, strictly quotes matched [1]..[4] sources & tables, zero canned filler)
       if (!replyText) {
