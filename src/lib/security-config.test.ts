@@ -44,7 +44,7 @@ describe("security configuration regression checks", () => {
     const server = read("server.ts");
     const component = read("src/components/CopilotDialog.tsx");
     expect(server).toContain("Clinical copilot authentication is not configured.");
-    expect(server).toContain("/auth/v1/user");
+    expect(read("server/supabaseAuth.ts")).toContain("/auth/v1/user");
     expect(server).toContain("Your session is invalid or expired.");
     expect(server).toContain("SUPABASE_ANON_KEY");
     expect(component).toContain("supabase?.auth.getSession()");
@@ -57,7 +57,7 @@ describe("security configuration regression checks", () => {
     expect(server).toContain("query.length > 12000");
     expect(server).toContain("typeof value !== 'string'");
     expect(server).toContain("contextBytes > 2 * 1024 * 1024");
-    expect(server).toContain("new URL('/auth/v1/user', supabaseUrl)");
+    expect(read("server/supabaseAuth.ts")).toContain("new URL('/auth/v1/user', config.url)");
   });
 
   it("does not use a VITE-prefixed Gemini key on the server and documents strict CORS origins", () => {
