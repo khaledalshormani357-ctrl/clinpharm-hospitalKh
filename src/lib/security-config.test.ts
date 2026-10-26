@@ -11,13 +11,16 @@ describe("security configuration regression checks", () => {
     expect(vite).not.toContain("VITE_GEMINI_API_KEY");
   });
 
-  it("does not pass Gemini secrets to client build workflows", () => {
+  it("does not pass Gemini secrets to client build workflows or call Gemini directly from the client", () => {
     for (const workflow of [
       ".github/workflows/build-android-apk.yml",
       ".github/workflows/deploy-github-pages.yml",
     ]) {
       expect(read(workflow)).not.toContain("VITE_GEMINI_API_KEY");
     }
+    const component = read("src/components/CopilotDialog.tsx");
+    expect(component).not.toContain("VITE_GEMINI_API_KEY");
+    expect(component).not.toContain("new GoogleGenAI");
   });
 
   it("reports live AI as configured only when an API key exists", () => {
