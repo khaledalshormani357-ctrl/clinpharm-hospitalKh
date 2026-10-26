@@ -40,6 +40,27 @@ describe("security configuration regression checks", () => {
     expect(engine).not.toContain("Ward: ${currentPatient.ward}");
   });
 
+  it("requires a verified Supabase access token before serving clinical copilot requests", () => {
+    const server = read("server.ts");
+    const component = read("src/components/CopilotDialog.tsx");
+    expect(server).toContain("Clinical copilot authentication is not configured.");
+    expect(server).toContain("/auth/v1/user");
+    expect(server).toContain("Your session is invalid or expired.");
+    expect(server).toContain("SUPABASE_ANON_KEY");
+    expect(component).toContain("supabase?.auth.getSession()");
+    expect(component).toContain("Authorization: `Bearer ${accessToken}`");
+  });
+
+  it("does not use a VITE-prefixed Gemini key on the server and documents strict CORS origins", () => {
+    const server = read("server.ts");
+    const env = read(".env.example");
+    expect(server).not.toContain("process.env.VITE_GEMINI_API_KEY");
+    expect(server).toContain("CORS_ALLOWED_ORIGINS");
+    expect(server).toContain("configuredOrigins.includes(origin)");
+    expect(env).not.toContain("VITE_GEMINI_API_KEY");
+    expect(read("README.md")).toContain("لا تضف مفتاح Gemini باسم `VITE_GEMINI_API_KEY`");
+  });
+
   it("does not send prior chat turns to remote copilot endpoints by default", () => {
     const component = read("src/components/CopilotDialog.tsx");
     expect(component).toContain("history: []");
