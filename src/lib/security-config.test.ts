@@ -22,11 +22,19 @@ describe("security configuration regression checks", () => {
 
   it("reports live AI as configured only when an API key exists", () => {
     const server = read("server.ts");
-    expect(server).toContain("liveAiReady: hasKey");
+    expect(server).toContain("liveAiConfigured: hasKey");
     expect(server).toContain("let liveAi = false;");
     expect(server).toContain("liveAi = true;");
     expect(server).toContain("liveAi\n");
     expect(server).not.toContain("error: errMessage");
+  });
+
+  it("omits direct patient identifiers from remote copilot context", () => {
+    const engine = read("src/lib/notebookLmEngine.ts");
+    expect(engine).toContain("De-identified clinical case:");
+    expect(engine).not.toContain("MRN: ${currentPatient.mrn}");
+    expect(engine).not.toContain("Active Inpatient: ${currentPatient.name}");
+    expect(engine).not.toContain("Ward: ${currentPatient.ward}");
   });
 
   it("does not make APK release errors invisible or depend on artifact upload quota", () => {
