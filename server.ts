@@ -55,7 +55,7 @@ async function startServer() {
   app.use(express.json({ limit: '6mb' }));
 
   app.get('/api/copilot/health', (_req, res) => {
-    const hasKey = Boolean(process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY);
+    const hasKey = Boolean(process.env.GEMINI_API_KEY);
     res.json({
       ok: true,
       liveAiConfigured: hasKey,
@@ -173,7 +173,7 @@ async function startServer() {
         return;
       }
 
-      const apiKey = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
+      const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) {
         const synthesized = extractGroundedSourceSynthesis(
           query.trim(),
