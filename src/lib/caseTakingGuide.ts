@@ -641,6 +641,7 @@ export const DISEASE_CASE_CHECKLISTS: DiseaseCaseTakingGuide[] = [
  * 3. حالات الاختبار المرجعية للتطبيق (Application Benchmark & Validation Test Cases)
  * مستخرجة من الدليل المرجعي لاختبار محركات التطبيق (PK/CrCl, Safety/DDI, MedRec, Simulator, SOAP)
  */
+// Adult DKA benchmark thresholds cross-checked against the 2024 ADA/EASD/AACE/JBDS/DTS consensus: https://doi.org/10.2337/dci24-0032
 export const BENCHMARK_APP_TEST_CASES: AppBenchmarkTestCase[] = [
   {
     id: 'test-case-dka-k',
@@ -674,18 +675,18 @@ export const BENCHMARK_APP_TEST_CASES: AppBenchmarkTestCase[] = [
     expectedAppFindingsAr: [
       'تنبيه حرج (STOP/HOLD): إيقاف Regular Insulin IV فوراً لأن K+ = 3.1 mEq/L (< 3.5) والبدء بتعويض KCl الوريدي أولاً.',
       'تنبيه MedRec: إيقاف Metformin (خطر Lactic Acidosis) وإيقاف Dapagliflozin (يسبب ويفاقم Ketoacidosis).',
-      'خطة التحويل: إضافة D5W عند وصول السكر < 200 mg/dL وتطبيق 2–4h Overlap مع Insulin Glargine قبل إيقاف الوريدي.'
+      'خطة التحويل: عند انخفاض BG إلى أقل من 250 mg/dL، أضف Dextrose 5–10% وخفّض تسريب الإنسولين الوريدي إلى 0.05 وحدة/كغ/ساعة؛ وعند التحويل إلى basal insulin، حافظ على التداخل الزمني وفق بروتوكول المستشفى (عادةً 1–2 ساعة على الأقل).'
     ],
     expectedAppFindingsEn: [
       'CRITICAL ALERT: Hold IV Regular Insulin immediately due to K+ 3.1 mEq/L (<3.5); replete IV KCl first.',
       'MedRec Alert: Hold Metformin and Dapagliflozin during acute DKA/AKI.',
-      'Transition Protocol: Add D5W when BG <200 mg/dL and overlap SC Glargine for 2–4h.'
+      'Transition Protocol (adult DKA consensus): when BG falls below 250 mg/dL, add 5–10% dextrose and reduce IV insulin to 0.05 units/kg/h; overlap basal insulin before stopping IV insulin per institutional protocol (at least 1–2 h).'
     ],
     patientData: {
       id: 'pt-test-dka',
       mrn: 'TEST-DKA-01',
-      name: 'نورة عبدالرحمن القحطاني (حالة اختبار DKA)',
-      nameEn: 'Noura A. Al-Qahtani (DKA Test Case)',
+      name: 'Synthetic DKA Test Patient',
+      nameEn: 'Synthetic DKA Test Patient',
       age: 46,
       gender: 'female',
       ward: 'ICU',
@@ -701,8 +702,8 @@ export const BENCHMARK_APP_TEST_CASES: AppBenchmarkTestCase[] = [
         'Type 2 Diabetes Mellitus on SGLT2i'
       ],
       admissionDate: '2026-10-21',
-      attendingPhysician: 'Dr. طارق العمري (ICU Consultant)',
-      clinicalPharmacist: 'Dr. خالد الشورماني (Clinical Pharmacist)',
+      attendingPhysician: 'Synthetic ICU Consultant',
+      clinicalPharmacist: 'Synthetic Clinical Pharmacist',
       status: 'critical',
       labs: {
         date: '2026-10-21',
