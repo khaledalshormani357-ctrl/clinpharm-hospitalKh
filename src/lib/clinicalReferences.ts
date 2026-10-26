@@ -2302,7 +2302,8 @@ export function searchClinicalReferences(query: string): {
     };
   }
 
-  const tokens = q.split(/\s+/).filter(t => t.length >= 2);
+  const expandedTokens = expandQueryTokensForLibrary(q);
+  const tokens = expandedTokens.length > 0 ? expandedTokens : q.split(/\s+/).filter(t => t.length >= 2);
 
   const scoredChapters = ACCP_2026_CHAPTERS.map(ch => {
     const haystack = [
@@ -2326,10 +2327,19 @@ export function searchClinicalReferences(query: string): {
       .toLowerCase();
 
     let score = 0;
-    if (haystack.includes(q)) score += 10;
+    if (haystack.includes(q)) score += 15;
+    let matchedCount = 0;
     for (const tok of tokens) {
-      if (ch.keywords.some(k => k.toLowerCase().includes(tok))) score += 5;
-      if (haystack.includes(tok)) score += 2;
+      if (ch.keywords.some(k => k.toLowerCase().includes(tok))) {
+        score += 8;
+        matchedCount++;
+      } else if (haystack.includes(tok)) {
+        score += 3;
+        matchedCount++;
+      }
+    }
+    if (matchedCount >= 2) {
+      score += matchedCount * 5;
     }
     return { ch, score };
   })
@@ -2349,9 +2359,9 @@ export function searchClinicalReferences(query: string): {
 }
 
 /**
- * Builds a grounded clinical context string from all 5 accredited references
- * (DiPiro 13th Ed, ACCP Cardiology 2026, ACCP Pharmacotherapy 2026 Vol 1 & 2, NotebookLM, and Google Drive)
- * for the AI Copilot and offline clinical consultation engine.
+ * Builds a grounded clinical context string from all 7 accredited references
+ * (Stockley's Drug Interactions, DiPiro 13th Ed, ACCP Cardiology 2026, ACCP Pharmacotherapy 2026 Vol 1 & 2, Casebook PPCP, and Hospital Compendium)
+ * for the AI Copilot and NotebookLM clinical consultation engine.
  */
 export function buildCopilotReferenceContext(query: string, lang: 'ar' | 'en'): {
   contextPrompt: string;
@@ -2362,12 +2372,13 @@ export function buildCopilotReferenceContext(query: string, lang: 'ar' | 'en'): 
   const topChapters = (chapters.length > 0 ? chapters : ACCP_2026_CHAPTERS).slice(0, 5);
 
   const sourcesHeader = `OFFICIAL IN-APP CLINICAL REFERENCE DATABASE (LOCAL EMBEDDED COMPENDIUM):
-1. DiPiro's Pharmacotherapy: A Pathophysiologic Approach (13th Edition) — Local DB URI: local://ref/source/dipiro-13th-ed (Archive ID: 1yKRfJ3jcIXqmT5kQ6DL8OXE0Ab6mhgwR)
-2. ACCP/ASHP Cardiology Pharmacy Preparatory Review Course (2026 Edition, BCCP) — Local DB URI: local://ref/source/accp-cardiology-2026 (Archive ID: 1-nvGR8JU21uXROJKtnnqOiCWESIiqeKt)
-3. ACCP Updates in Therapeutics® 2026: Pharmacotherapy Preparatory Review and Recertification Course (Volumes 1 & 2, 1,274 pages, BCPS) — Local DB URI: local://ref/source/accp-2026-vol1-vol2 (Archive ID: 1yYqokFGeNRAGcZMu5iCmERQn9w_PD1By)
-4. ClinPharm Local Stewardship & NotebookLM Hub — Local DB URI: local://ref/source/notebooklm-31c74a31 (Hub ID: 31c74a31-d444-4339-afd0-b74d8b045d98)
-5. Hospital Clinical Dosing Compendium & IV Guardrails — Local DB URI: local://ref/source/gdrive-clinical-ref-2 (Archive ID: 1nMrGfPbBjhkgRUehntRDQHyV6VAKRWkC)
-6. Clinical Pharmacy Casebook & Bedside Patient Workup Guide (PPCP, Case-Taking Checklists, App Test Cases & Student OSCE Cases) — Local DB URI: local://ref/source/clinical-casebook-guide (Archive ID: 1mV4XwXY6k3f8zi-GO321tKUzqwRw-4lP)`;
+1. Stockley's Drug Interactions (13th/2026 Hospital Reference Edition) — Local DB URI: local://ref/source/stockleys-drug-interactions (Google Drive ID: 1eg07NXxWYgJq0NxLf0Vim1JlV7KTu16S)
+2. DiPiro's Pharmacotherapy: A Pathophysiologic Approach (13th Edition) — Local DB URI: local://ref/source/dipiro-13th-ed (Archive ID: 1yKRfJ3jcIXqmT5kQ6DL8OXE0Ab6mhgwR)
+3. ACCP/ASHP Cardiology Pharmacy Preparatory Review Course (2026 Edition, BCCP) — Local DB URI: local://ref/source/accp-cardiology-2026 (Archive ID: 1-nvGR8JU21uXROJKtnnqOiCWESIiqeKt)
+4. ACCP Updates in Therapeutics® 2026: Pharmacotherapy Preparatory Review and Recertification Course (Volumes 1 & 2, 1,274 pages, BCPS) — Local DB URI: local://ref/source/accp-2026-vol1-vol2 (Archive ID: 1yYqokFGeNRAGcZMu5iCmERQn9w_PD1By)
+5. ClinPharm Local Stewardship & NotebookLM Hub — Local DB URI: local://ref/source/notebooklm-31c74a31 (Hub ID: 31c74a31-d444-4339-afd0-b74d8b045d98)
+6. Hospital Clinical Dosing Compendium & IV Guardrails — Local DB URI: local://ref/source/gdrive-clinical-ref-2 (Archive ID: 1nMrGfPbBjhkgRUehntRDQHyV6VAKRWkC)
+7. Clinical Pharmacy Casebook & Bedside Patient Workup Guide (Schwinghammer e-Casebook & PPCP) — Local DB URI: local://ref/source/clinical-casebook-guide (Archive ID: 1mV4XwXY6k3f8zi-GO321tKUzqwRw-4lP)`;
 
   const chapterBlocks = topChapters
     .map(ch => {
@@ -2392,7 +2403,7 @@ export function buildCopilotReferenceContext(query: string, lang: 'ar' | 'en'): 
       : '';
 
   return {
-    contextPrompt: `${sourcesHeader}\n\nRELEVANT DIPIRO 13TH ED, ACCP CARDIOLOGY 2026 & ACCP PHARMACOTHERAPY 2026 EXCERPTS:\n${chapterBlocks}${customBlocks}`,
+    contextPrompt: `${sourcesHeader}\n\nRELEVANT DIPIRO 13TH ED, STOCKLEY'S DDI, ACCP CARDIOLOGY 2026 & ACCP PHARMACOTHERAPY 2026 EXCERPTS:\n${chapterBlocks}${customBlocks}`,
     matchedChapters: topChapters,
     matchedCustomNotes: customNotes.slice(0, 3)
   };
@@ -2406,7 +2417,7 @@ export interface ResolvedLocalReference {
   verbatimChapterId?: string;
 }
 
-import { getVerbatimChapterById } from './library';
+import { getVerbatimChapterById, expandQueryTokensForLibrary } from './library';
 export * from './library';
 
 /**

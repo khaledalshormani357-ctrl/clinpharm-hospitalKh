@@ -98,7 +98,13 @@ export function GoogleDriveBookSyncModal({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const refreshVaultDiagnostics = async () => {
-    const records = await hydrateSyncedFullBooks();
+    let records = await hydrateSyncedFullBooks();
+    if (records.length < KNOWN_DRIVE_BOOK_MAPPINGS.length) {
+      const { ensureAllCoreBooksPreloadedOffline } = await import(
+        '../../lib/googleDrive/embeddedBookCompiler'
+      );
+      records = await ensureAllCoreBooksPreloadedOffline(false);
+    }
     setSyncedBooks(records);
     const diag = await getOfflineVaultDiagnostics();
     setVaultDiag(diag);

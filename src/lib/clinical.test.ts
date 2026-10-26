@@ -170,14 +170,15 @@ describe("evidence & finalization gate", () => {
     ).toBe(true);
   });
 
-  it("validates all 6 accredited reference sources (including Casebook Guide) and executes case simulation & test cases", () => {
-    expect(PRIMARY_CLINICAL_REFERENCES.length).toBe(6);
+  it("validates all 7 accredited reference sources (including Casebook Guide & Stockley's DDI) and executes case simulation & test cases", () => {
+    expect(PRIMARY_CLINICAL_REFERENCES.length).toBe(7);
     for (const ref of PRIMARY_CLINICAL_REFERENCES) {
       expect(isValidEvidenceReference(ref.viewUrl, "Accredited Reference")).toBe(true);
     }
     expect(ACCP_2026_CHAPTERS.some((c) => c.bookId === "dipiro-13th")).toBe(true);
     expect(ACCP_2026_CHAPTERS.some((c) => c.bookId === "accp-cardio-2026")).toBe(true);
     expect(ACCP_2026_CHAPTERS.some((c) => c.bookId === "casebook-guide")).toBe(true);
+    expect(ACCP_2026_CHAPTERS.some((c) => c.bookId === "stockleys-drug-interactions")).toBe(true);
     expect(ACCP_2026_CHAPTERS.some((c) => c.volume === 1)).toBe(true);
     expect(ACCP_2026_CHAPTERS.some((c) => c.volume === 2)).toBe(true);
 

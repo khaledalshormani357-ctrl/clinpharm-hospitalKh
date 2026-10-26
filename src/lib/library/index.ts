@@ -202,10 +202,14 @@ export function getAllVerbatimBooks(): VerbatimBook[] {
     const synced = syncedRecords.find(r => r.bookId === baseBook.id);
     if (!synced) return baseBook;
 
+    const extraChapters = synced.chapters.filter(
+      sc => !baseBook.chapters.some(bc => bc.id === sc.id)
+    );
+
     return {
       ...baseBook,
       edition: `${baseBook.edition} • Full PDF Synced (${synced.totalPages} Pages)`,
-      chapters: [...baseBook.chapters, ...synced.chapters]
+      chapters: extraChapters.length > 0 ? [...baseBook.chapters, ...extraChapters] : baseBook.chapters
     };
   });
 
@@ -266,6 +270,135 @@ export function getVerbatimChapterById(chapterId: string): VerbatimChapter | und
   return undefined;
 }
 
+const ARABIC_TO_ENGLISH_MEDICAL_MAP: Record<string, string[]> = {
+  وارفارين: ['warfarin', 'coumarin', 'inr', 'cyp2c9', 'vkorc1'],
+  ورفرين: ['warfarin', 'coumarin', 'inr', 'cyp2c9'],
+  اميودارون: ['amiodarone', 'cyp2c9', 'qtc', 'digoxin'],
+  أميودارون: ['amiodarone', 'cyp2c9', 'qtc', 'digoxin'],
+  فانكومايسين: ['vancomycin', 'auc24', 'auc', 'trough', 'mrsa', 'nephrotoxicity'],
+  فانكوميسين: ['vancomycin', 'auc24', 'auc', 'trough', 'mrsa'],
+  ميروبينيم: ['meropenem', 'carbapenem', 'valproate', 'valproic'],
+  كاربابينيم: ['carbapenem', 'meropenem', 'imipenem', 'valproate'],
+  فالبروات: ['valproate', 'valproic', 'meropenem', 'carbapenem'],
+  ديباكين: ['valproate', 'valproic', 'meropenem'],
+  كلوبيدوجريل: ['clopidogrel', 'p2y12', 'cyp2c19', 'omeprazole', 'pantoprazole'],
+  بلافيكس: ['clopidogrel', 'p2y12', 'cyp2c19', 'omeprazole'],
+  اوميبرازول: ['omeprazole', 'esomeprazole', 'cyp2c19', 'clopidogrel', 'pantoprazole'],
+  أوميبرازول: ['omeprazole', 'esomeprazole', 'cyp2c19', 'clopidogrel', 'pantoprazole'],
+  بانتوبرازول: ['pantoprazole', 'ppi', 'clopidogrel'],
+  تيكاجريلور: ['ticagrelor', 'p2y12', 'acs', 'switching'],
+  كانجريلور: ['cangrelor', 'p2y12', 'switching'],
+  براسوجريل: ['prasugrel', 'p2y12', 'acs'],
+  انتريستو: ['entresto', 'sacubitril', 'valsartan', 'arni', '36-hour', 'washout'],
+  إنتريستو: ['entresto', 'sacubitril', 'valsartan', 'arni', '36-hour', 'washout'],
+  ساكوبيتريل: ['sacubitril', 'valsartan', 'entresto', 'arni', 'washout'],
+  فالسارتان: ['valsartan', 'sacubitril', 'entresto', 'arb'],
+  راميبريل: ['ramipril', 'acei', 'washout', 'entresto', 'hyperkalemia'],
+  ليزينوبريل: ['lisinopril', 'acei', 'washout', 'hyperkalemia'],
+  اينالابريل: ['enalapril', 'acei', 'washout'],
+  إينالابريل: ['enalapril', 'acei', 'washout'],
+  سبيرونولاكتون: ['spironolactone', 'eplerenone', 'mra', 'hyperkalemia', 'potassium', 'ascites'],
+  فوروسيميد: ['furosemide', 'loop', 'diuretic', 'adhf', 'congestion'],
+  لازكس: ['furosemide', 'loop', 'diuretic'],
+  ديجوكسين: ['digoxin', 'p-gp', 'amiodarone', 'verapamil', 'toxicity'],
+  ابيكسابان: ['apixaban', 'doac', 'afib', 'cyp3a4', 'p-gp'],
+  أبيكسابان: ['apixaban', 'doac', 'afib', 'cyp3a4', 'p-gp'],
+  ريفاروكسابان: ['rivaroxaban', 'doac', 'crcl', 'cyp3a4'],
+  دابيجاتران: ['dabigatran', 'doac', 'p-gp', 'idarucizumab'],
+  هيبارين: ['heparin', 'ufh', 'aptt', 'hit', 'argatroban', 'protamine'],
+  اينوكسابارين: ['enoxaparin', 'lmwh', 'anti-xa', 'crcl'],
+  إينوكسابارين: ['enoxaparin', 'lmwh', 'anti-xa', 'crcl'],
+  لينزوليد: ['linezolid', 'maoi', 'serotonin', 'ssri', 'fentanyl'],
+  تازوسين: ['piperacillin', 'tazobactam', 'vancomycin', 'cefepime', 'aki'],
+  بيبيراسيلين: ['piperacillin', 'tazobactam', 'vancomycin', 'aki'],
+  تازوباكتام: ['tazobactam', 'piperacillin', 'vancomycin'],
+  سيفيبيم: ['cefepime', 'neurotoxicity', 'renal'],
+  سيبروفلوكساسين: ['ciprofloxacin', 'fluoroquinolone', 'qtc', 'chelation', 'theophylline'],
+  ليفوفلوكساسين: ['levofloxacin', 'fluoroquinolone', 'qtc', 'chelation'],
+  فلوكونازول: ['fluconazole', 'voriconazole', 'cyp2c9', 'cyp3a4', 'qtc', 'warfarin'],
+  كلاريثروميسين: ['clarithromycin', 'macrolide', 'cyp3a4', 'qtc', 'statin', 'colchicine'],
+  ازيثروميسين: ['azithromycin', 'macrolide', 'qtc'],
+  أزيثروميسين: ['azithromycin', 'macrolide', 'qtc'],
+  اتورفاستاتين: ['atorvastatin', 'statin', 'cyp3a4', 'rhabdomyolysis'],
+  أتورفاستاتين: ['atorvastatin', 'statin', 'cyp3a4', 'rhabdomyolysis'],
+  سيمفاستاتين: ['simvastatin', 'statin', 'cyp3a4', 'amiodarone', 'amlodipine'],
+  كولشيسين: ['colchicine', 'cyp3a4', 'p-gp', 'clarithromycin'],
+  ليثيوم: ['lithium', 'nsaid', 'acei', 'thiazide', 'toxicity'],
+  ميتفورمين: ['metformin', 'egfr', 'lactic', 'acidosis', 'contrast'],
+  انسولين: ['insulin', 'dka', 'potassium', 'glucose', 'hypoglycemia'],
+  أنسولين: ['insulin', 'dka', 'potassium', 'glucose', 'hypoglycemia'],
+  بوتاسيوم: ['potassium', 'kcl', 'hyperkalemia', 'hypokalemia'],
+  صوديوم: ['sodium', 'hyponatremia', 'hypertonic', 'ods'],
+  كالسيوم: ['calcium', 'gluconate', 'hyperkalemia'],
+  مغنيسيوم: ['magnesium', 'torsades', 'qtc'],
+  نورايبينفرين: ['norepinephrine', 'vasopressor', 'septic', 'extravasation', 'phentolamine'],
+  نورإبينفرين: ['norepinephrine', 'vasopressor', 'septic', 'extravasation', 'phentolamine'],
+  ستوكلي: ['stockley', 'interaction', 'ddi', 'cyp', 'p-gp'],
+  تداخل: ['stockley', 'interaction', 'interactions', 'ddi', 'contraindicated'],
+  تداخلات: ['stockley', 'interaction', 'interactions', 'ddi', 'contraindicated'],
+  تعارض: ['stockley', 'interaction', 'interactions', 'ddi', 'contraindicated'],
+  تعارضات: ['stockley', 'interaction', 'interactions', 'ddi', 'contraindicated'],
+  ديبيرو: ['dipiro', 'pathophysiologic'],
+  كلى: ['renal', 'aki', 'ckd', 'crcl', 'nephrology'],
+  كلوي: ['renal', 'aki', 'ckd', 'crcl', 'nephrology'],
+  غسيل: ['hemodialysis', 'crrt', 'renal'],
+  قلب: ['heart failure', 'hfref', 'adhf', 'acs', 'cardiology'],
+  كبد: ['cirrhosis', 'ascites', 'hepatic', 'encephalopathy', 'child-pugh'],
+  تليف: ['cirrhosis', 'ascites', 'hepatic', 'spironolactone', 'furosemide'],
+  استسقاء: ['ascites', 'cirrhosis', 'spironolactone', 'furosemide', 'sbp'],
+  انتان: ['sepsis', 'septic', 'shock', 'lactate', 'norepinephrine'],
+  إنتان: ['sepsis', 'septic', 'shock', 'lactate', 'norepinephrine']
+};
+
+const QUERY_STOPWORDS = new Set([
+  'ما', 'هي', 'هو', 'هل', 'كيف', 'متى', 'لماذا', 'أين', 'في', 'من', 'على', 'إلى', 'الى', 'عن', 'مع', 'او', 'أو', 'ثم', 'بين',
+  'هذا', 'هذه', 'ذلك', 'تلك', 'الذي', 'التي', 'كل', 'بعض', 'أي', 'اي', 'حول', 'وفق', 'حسب', 'مرجع', 'كتاب', 'فصل', 'قسم',
+  'مريض', 'المريض', 'حالي', 'الحالي', 'نشط', 'النشط', 'ملف', 'حالة', 'توصيات', 'توصية', 'جرعة', 'جرعات', 'دواء', 'أدوية', 'ادوية',
+  'اريد', 'أريد', 'اعطني', 'أعطني', 'اشرح', 'وضح', 'فحص', 'افحص', 'راجع', 'مراجعة', 'شاملة', 'كاملة', 'بالكامل',
+  'what', 'is', 'are', 'was', 'were', 'the', 'a', 'an', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'per',
+  'and', 'or', 'how', 'when', 'why', 'which', 'who', 'can', 'should', 'would', 'could', 'please', 'check', 'screen', 'review',
+  'patient', 'active', 'current', 'medications', 'medication', 'drug', 'drugs', 'dose', 'dosing', 'guideline', 'guidelines',
+  'recommendations', 'recommendation', 'book', 'chapter', 'section', 'reference', 'edition', 'ed', 'vol', 'ch'
+]);
+
+export function expandQueryTokensForLibrary(query: string): string[] {
+  const normalized = query
+    .toLowerCase()
+    .replace(/[؟?!.,;:"'()[\]{}<>«»ـ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!normalized) return [];
+
+  const rawWords = normalized.split(' ');
+  const tokenSet = new Set<string>();
+
+  for (const word of rawWords) {
+    if (!word || word.length < 2) continue;
+    const strippedAr = word.replace(/^(وال|بال|كال|فال|لل|ال)/, '');
+
+    if (!QUERY_STOPWORDS.has(word) && !QUERY_STOPWORDS.has(strippedAr)) {
+      if (word.length >= 2) tokenSet.add(word);
+      if (strippedAr.length >= 2) tokenSet.add(strippedAr);
+    }
+
+    for (const candidate of [word, strippedAr]) {
+      const mapped = ARABIC_TO_ENGLISH_MEDICAL_MAP[candidate];
+      if (mapped) {
+        mapped.forEach(m => tokenSet.add(m.toLowerCase()));
+      }
+    }
+  }
+
+  for (const [arKey, enList] of Object.entries(ARABIC_TO_ENGLISH_MEDICAL_MAP)) {
+    if (normalized.includes(arKey)) {
+      enList.forEach(m => tokenSet.add(m.toLowerCase()));
+    }
+  }
+
+  return Array.from(tokenSet);
+}
+
 export function searchVerbatimLibrary(
   query: string,
   options?: {
@@ -276,6 +409,7 @@ export function searchVerbatimLibrary(
   const cleanQ = query.trim().toLowerCase();
   if (!cleanQ) return [];
 
+  const tokens = expandQueryTokensForLibrary(cleanQ);
   const results: LibrarySearchMatch[] = [];
 
   for (const book of getAllVerbatimBooks()) {
@@ -292,77 +426,155 @@ export function searchVerbatimLibrary(
         continue;
       }
 
-      // 1. Chapter Title & Keywords Match
+      const chapterTitleHay = `${chapter.title} ${chapter.titleAr} ${chapter.keywords.join(' ')} ${book.badge} ${book.title}`.toLowerCase();
+
+      // 1. Chapter Title & Keywords Match (Exact or Multi-Token)
+      let titleScore = 0;
       if (
         chapter.title.toLowerCase().includes(cleanQ) ||
         chapter.titleAr.toLowerCase().includes(cleanQ) ||
         chapter.keywords.some(k => k.toLowerCase().includes(cleanQ))
       ) {
+        titleScore += 100;
+      }
+
+      let matchedKeywordCount = 0;
+      for (const tok of tokens) {
+        if (chapter.keywords.some(k => k.toLowerCase().includes(tok))) {
+          titleScore += 22;
+          matchedKeywordCount++;
+        } else if (chapterTitleHay.includes(tok)) {
+          titleScore += 14;
+          matchedKeywordCount++;
+        }
+      }
+
+      if (titleScore >= 25) {
         results.push({
           book,
           chapter,
           matchType: 'title',
-          snippet: `${chapter.title} • Keywords: ${chapter.keywords.slice(0, 5).join(', ')}`,
-          score: 100
+          snippet: `${chapter.title} • Keywords: ${chapter.keywords.slice(0, 6).join(', ')}`,
+          score: titleScore + matchedKeywordCount * 5
         });
       }
 
-      // 2. Section Heading & Body Matches
+      // 2. Section Heading & Body Matches (Exact or Multi-Token)
       for (const section of chapter.sections) {
-        const headingMatch =
-          section.heading.toLowerCase().includes(cleanQ) ||
-          section.headingAr.toLowerCase().includes(cleanQ);
+        const headingHay = `${section.heading} ${section.headingAr} ${section.evidenceGrade || ''}`.toLowerCase();
+        const bodyLower = section.body.toLowerCase();
+        const notesLower = (section.clinicalNotes || []).join(' ').toLowerCase();
 
-        const bodyIndex = section.body.toLowerCase().indexOf(cleanQ);
+        let secScore = 0;
+        let firstMatchIdx = -1;
+        let firstMatchLen = cleanQ.length;
 
-        if (headingMatch || bodyIndex !== -1) {
+        if (headingHay.includes(cleanQ)) {
+          secScore += 95;
+        }
+        const exactBodyIdx = bodyLower.indexOf(cleanQ);
+        if (exactBodyIdx !== -1) {
+          secScore += 80;
+          firstMatchIdx = exactBodyIdx;
+        }
+
+        let matchedTokensInSec = 0;
+        for (const tok of tokens) {
+          let tokenMatchedHere = false;
+          if (headingHay.includes(tok)) {
+            secScore += 24;
+            tokenMatchedHere = true;
+          }
+          const tokIdx = bodyLower.indexOf(tok);
+          if (tokIdx !== -1) {
+            secScore += 15;
+            tokenMatchedHere = true;
+            if (firstMatchIdx === -1) {
+              firstMatchIdx = tokIdx;
+              firstMatchLen = tok.length;
+            }
+          }
+          if (notesLower.includes(tok)) {
+            secScore += 12;
+            tokenMatchedHere = true;
+          }
+          if (tokenMatchedHere) {
+            matchedTokensInSec++;
+          }
+        }
+
+        // Boost when multiple distinct query tokens co-occur in the same section
+        if (matchedTokensInSec >= 2) {
+          secScore += matchedTokensInSec * 18;
+        }
+
+        if (secScore >= 20) {
           let snippet = '';
-          if (bodyIndex !== -1) {
-            const start = Math.max(0, bodyIndex - 80);
-            const end = Math.min(section.body.length, bodyIndex + cleanQ.length + 100);
+          if (firstMatchIdx !== -1) {
+            const start = Math.max(0, firstMatchIdx - 90);
+            const end = Math.min(section.body.length, firstMatchIdx + firstMatchLen + 160);
             snippet = `...${section.body.slice(start, end).replace(/\n+/g, ' ')}...`;
           } else {
-            snippet = section.body.slice(0, 160).replace(/\n+/g, ' ') + '...';
+            snippet = section.body.slice(0, 220).replace(/\n+/g, ' ') + '...';
           }
 
           results.push({
             book,
             chapter,
             section,
-            matchType: headingMatch ? 'heading' : 'body',
+            matchType: headingHay.includes(cleanQ) || matchedTokensInSec >= 2 ? 'heading' : 'body',
             snippet,
-            score: headingMatch ? 80 : 50
+            score: secScore
           });
         }
       }
 
       // 3. Board Pearls Match
-      for (const pearl of chapter.boardPearls) {
-        if (pearl.toLowerCase().includes(cleanQ)) {
+      const allPearls = [...chapter.boardPearls, ...(chapter.boardPearlsAr || [])];
+      for (const pearl of allPearls) {
+        const pearlLower = pearl.toLowerCase();
+        let pearlScore = pearlLower.includes(cleanQ) ? 85 : 0;
+        let pearlTokens = 0;
+        for (const tok of tokens) {
+          if (pearlLower.includes(tok)) {
+            pearlScore += 16;
+            pearlTokens++;
+          }
+        }
+        if (pearlScore >= 28 || pearlTokens >= 2) {
           results.push({
             book,
             chapter,
             matchType: 'pearl',
-            snippet: pearl.slice(0, 180) + '...',
-            score: 75
+            snippet: pearl.slice(0, 220) + (pearl.length > 220 ? '...' : ''),
+            score: pearlScore + pearlTokens * 10
           });
           break;
         }
       }
 
-      // 4. Quick Tables Match
-      for (const table of chapter.quickTables) {
-        if (
-          table.title.toLowerCase().includes(cleanQ) ||
-          table.headers.some(h => h.toLowerCase().includes(cleanQ)) ||
-          table.rows.some(r => r.some(cell => cell.toLowerCase().includes(cleanQ)))
-        ) {
+      // 4. Quick Tables & Section Tables Match
+      const allTables = [
+        ...chapter.quickTables,
+        ...chapter.sections.flatMap(s => s.tables || [])
+      ];
+      for (const table of allTables) {
+        const tableHay = `${table.title} ${table.titleAr || ''} ${table.headers.join(' ')} ${table.rows.map(r => r.join(' ')).join(' ')}`.toLowerCase();
+        let tableScore = tableHay.includes(cleanQ) ? 80 : 0;
+        let tableTokens = 0;
+        for (const tok of tokens) {
+          if (tableHay.includes(tok)) {
+            tableScore += 16;
+            tableTokens++;
+          }
+        }
+        if (tableScore >= 28 || tableTokens >= 2) {
           results.push({
             book,
             chapter,
             matchType: 'table',
-            snippet: `Table: ${table.title} (Found matching row or header)`,
-            score: 70
+            snippet: `Table: ${table.title} (${table.rows.length} reference rows)`,
+            score: tableScore + tableTokens * 10
           });
           break;
         }

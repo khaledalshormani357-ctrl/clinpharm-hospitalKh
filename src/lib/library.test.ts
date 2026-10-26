@@ -10,9 +10,9 @@ import {
 import { resolveLocalReference } from './clinicalReferences';
 
 describe('In-App Verbatim Medical Library (All Books & All Chapters)', () => {
-  it('should load all 6 accredited medical reference books with multiple chapters in every book', () => {
+  it('should load all 7 accredited medical reference books with multiple chapters in every book', () => {
     const books = getAllVerbatimBooks();
-    expect(books.length).toBe(6);
+    expect(books.length).toBe(7);
 
     const expectedCounts: Record<string, number> = {
       'dipiro-13th-ed': 8,
@@ -20,7 +20,8 @@ describe('In-App Verbatim Medical Library (All Books & All Chapters)', () => {
       'accp-2026-vol1': 10,
       'accp-2026-vol2': 10,
       'clinical-casebook-guide': 5,
-      'hospital-compendium': 5
+      'hospital-compendium': 5,
+      'stockleys-drug-interactions': 3
     };
 
     for (const [bookId, minCount] of Object.entries(expectedCounts)) {
@@ -30,9 +31,9 @@ describe('In-App Verbatim Medical Library (All Books & All Chapters)', () => {
     }
   });
 
-  it('should have 44 complete chapters with verbatim source sections, TOC, and board pearls', () => {
+  it('should have 47 complete chapters with verbatim source sections, TOC, and board pearls', () => {
     const chapters = getAllVerbatimChapters();
-    expect(chapters.length).toBe(44);
+    expect(chapters.length).toBe(47);
 
     for (const ch of chapters) {
       expect(ch.title).toBeTruthy();

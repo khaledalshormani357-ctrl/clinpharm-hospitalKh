@@ -1,7 +1,8 @@
 import React, { useState } from "react";
-import { FileText, Plus, CheckCircle2, Clock, Filter, X, Wand2, BookOpen, Database } from "lucide-react";
+import { FileText, Plus, CheckCircle2, Clock, Filter, X, Wand2, BookOpen, Database, Printer, Share2 } from "lucide-react";
 import { ClinicalIntervention, InterventionStatus, Patient, DRPType, Language } from "../../types/clinical";
 import { ACCP_2026_CHAPTERS } from "../../lib/clinicalReferences";
+import { printOrSaveClinicalPdf, shareClinicalFile } from "../../lib/androidPermissions";
 
 interface DocumentationPanelProps {
   interventions: ClinicalIntervention[];
@@ -182,13 +183,62 @@ export function DocumentationPanel({
             </p>
           </div>
         </div>
-        <button 
-          onClick={() => setIsModalOpen(true)}
-          className="flex items-center justify-center gap-2 bg-slate-900 dark:bg-teal-600 text-white px-4 py-2.5 min-h-[44px] rounded-xl text-xs sm:text-sm font-bold hover:bg-slate-800 dark:hover:bg-teal-500 transition-colors shadow-xs cursor-pointer shrink-0"
-        >
-          <Plus className="h-4 w-4" />
-          {lang === 'ar' ? '+ توثيق SOAP / DRP جديد' : '+ New SOAP Intervention'}
-        </button>
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => {
+              const md = [
+                `# Clinical Pharmacist SOAP Interventions Log`,
+                ...filteredList.map(
+                  (it, i) =>
+                    `## ${i + 1}. ${it.patientName} (${it.mrn}) — ${it.medicationInvolved}\n- **DRP:** ${it.drpType} (${it.severity.toUpperCase()})\n- **Issue (S/O):** ${it.clinicalIssue}\n- **Rationale (A):** ${it.rationale}\n- **Plan (P):** ${it.proposedRecommendation}\n- **Reference:** ${it.referenceTitle || 'Verified Local Reference'}`
+                )
+              ].join('\n\n');
+              printOrSaveClinicalPdf({
+                title:
+                  lang === 'ar'
+                    ? 'سجل التدخلات السريرية وملاحظات SOAP — ClinPharm Hospital'
+                    : 'Clinical Pharmacist SOAP Interventions Log',
+                subtitle: `Total Documented Interventions: ${filteredList.length}`,
+                bodyMarkdownOrText: md,
+                filenameBase: 'ClinPharm-SOAP-Interventions-Log',
+                dir: lang === 'ar' ? 'rtl' : 'ltr'
+              });
+            }}
+            className="flex items-center justify-center gap-1.5 bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 px-3.5 py-2.5 min-h-[44px] rounded-xl text-xs font-bold hover:bg-slate-200 transition-colors cursor-pointer"
+          >
+            <Printer className="h-4 w-4 text-indigo-600" />
+            <span>{lang === 'ar' ? 'طباعة / PDF' : 'Print / PDF'}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              const md = [
+                `# Clinical Pharmacist SOAP Interventions Log`,
+                ...filteredList.map(
+                  (it, i) =>
+                    `## ${i + 1}. ${it.patientName} (${it.mrn}) — ${it.medicationInvolved}\n- **DRP:** ${it.drpType} (${it.severity.toUpperCase()})\n- **Issue (S/O):** ${it.clinicalIssue}\n- **Rationale (A):** ${it.rationale}\n- **Plan (P):** ${it.proposedRecommendation}`
+                )
+              ].join('\n\n');
+              void shareClinicalFile({
+                filename: 'ClinPharm-SOAP-Interventions-Log.md',
+                title: 'ClinPharm Hospital — SOAP Interventions Log',
+                content: md
+              });
+            }}
+            className="flex items-center justify-center gap-1.5 bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 px-3.5 py-2.5 min-h-[44px] rounded-xl text-xs font-bold hover:bg-slate-200 transition-colors cursor-pointer"
+          >
+            <Share2 className="h-4 w-4 text-emerald-600" />
+            <span>{lang === 'ar' ? 'مشاركة' : 'Share'}</span>
+          </button>
+          <button 
+            onClick={() => setIsModalOpen(true)}
+            className="flex items-center justify-center gap-2 bg-slate-900 dark:bg-teal-600 text-white px-4 py-2.5 min-h-[44px] rounded-xl text-xs sm:text-sm font-bold hover:bg-slate-800 dark:hover:bg-teal-500 transition-colors shadow-xs cursor-pointer shrink-0"
+          >
+            <Plus className="h-4 w-4" />
+            {lang === 'ar' ? '+ توثيق SOAP / DRP جديد' : '+ New SOAP Intervention'}
+          </button>
+        </div>
       </div>
 
       {/* Android Bottom-Sheet Modal for SOAP Note Creation */}

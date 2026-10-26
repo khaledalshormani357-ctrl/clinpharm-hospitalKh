@@ -3,18 +3,19 @@ export const translations = {
     appName: 'ClinPharm Hospital',
     systemTitle: 'Clinical Pharmacy & CDSS Platform',
     hospitalName: 'مستشفى الشفاء التخصصي • Clinical Pharmacy Dept',
-    dutyPharmacist: 'د. خالد الشورماني (Board-Certified Clinical Pharmacist - BCPS)',
+    dutyPharmacist: 'مدير النظام: د. خالد الشرماني (Board-Certified Clinical Pharmacist - BCPS)',
     shift: 'Shift: الصباحية (ICU / CCU & Inpatient Wards)',
 
     // Navigation tabs (Medical Mix: Arabic syntax + English medical terms)
     tabs: {
       patients: 'الأجنحة (Inpatient Rounds)',
       reconciliation: 'مطابقة الأدوية (MedRec)',
-      calculators: 'حاسبات PK & Clinical',
+      calculators: 'حاسبات الأطفال & DynaMedex',
       alerts: 'فحص Safety & DDI',
       interventions: 'التدخلات (DRP & SOAP)',
-      guidelines: 'المكتبة والمحاكاة (Library & Sim)',
+      guidelines: 'المكتبة والمراجع (7 Books)',
       training: 'حالات Clinical Cases',
+      users_admin: 'المستخدمون ومدير النظام (خالد الشرماني)',
       copilot: 'المساعد السريري (AI Copilot)',
     },
 
@@ -22,12 +23,13 @@ export const translations = {
     mobileNav: {
       patients: 'Rounds',
       guidelines: 'Library/Sim',
-      calculators: 'PK Calc',
+      calculators: 'Peds/Calc',
       interventions: 'DRP & SOAP',
       alerts: 'Safety/DDI',
       reconciliation: 'MedRec',
       training: 'Cases',
-      more: 'MedRec/Cases',
+      users_admin: 'المستخدمون',
+      more: 'المستخدمون/المزيد',
     },
 
     // Wards
@@ -115,29 +117,31 @@ export const translations = {
     appName: 'ClinPharm Hospital',
     systemTitle: 'Comprehensive Clinical Pharmacy System',
     hospitalName: 'Al-Shifa Specialized Hospital - Medical Admin',
-    dutyPharmacist: 'Dr. Khaled Al-Shormani (Board-Certified Clinical Pharmacist)',
+    dutyPharmacist: 'System Admin: Dr. Khaled Al-Shormani (BCPS Clinical Pharmacist)',
     shift: 'Shift: Morning (Critical Care & Inpatient Wards)',
 
     tabs: {
       patients: 'Patients & Rounds',
       reconciliation: 'Med Reconciliation',
-      calculators: 'Clinical Calculators',
+      calculators: 'Peds & DynaMedex Calc',
       alerts: 'Safety & Interactions',
       interventions: 'Interventions (DRP)',
-      guidelines: 'Medical Library & Simulator',
+      guidelines: 'Medical Library (7 Books)',
       training: 'Clinical Cases & Training',
+      users_admin: 'Users & Admin (Khaled Al-Shormani)',
       copilot: 'AI Copilot Assistant',
     },
 
     mobileNav: {
       patients: 'Rounds',
       guidelines: 'Library/Sim',
-      calculators: 'PK Calc',
+      calculators: 'Peds/Calc',
       interventions: 'DRP & SOAP',
       alerts: 'Safety/DDI',
       reconciliation: 'MedRec',
       training: 'Cases',
-      more: 'MedRec/Cases',
+      users_admin: 'Users/Admin',
+      more: 'Users/More',
     },
 
     wards: {

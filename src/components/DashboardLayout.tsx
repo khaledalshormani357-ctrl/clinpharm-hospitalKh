@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Patient, PatientStatus, Language, ClinicalIntervention, ReconciliationDiscrepancy, Medication, LabResult } from '../types/clinical';
 import { translations } from '../lib/i18n';
 import {
@@ -20,12 +20,15 @@ import {
   AlertTriangle,
   Building2,
   Database,
-  FileDown,
   GitBranch,
   Table,
   CheckCircle2,
   X,
-  Download
+  Download,
+  ShieldCheck,
+  Printer,
+  Share2,
+  Crown
 } from 'lucide-react';
 import { ReconciliationPanel } from './workspace/ReconciliationPanel';
 import { CalculatorsPanel } from './workspace/CalculatorsPanel';
@@ -33,14 +36,19 @@ import { AlertsPanel } from './workspace/AlertsPanel';
 import { DocumentationPanel } from './workspace/DocumentationPanel';
 import { GuidelinesPanel } from './workspace/GuidelinesPanel';
 import { TrainingPanel } from './workspace/TrainingPanel';
+import { UsersAdminPanel } from './workspace/UsersAdminPanel';
 import { CopilotDialog } from './CopilotDialog';
 import { PatientDetailsModal } from './PatientDetailsModal';
 import { NewPatientModal } from './NewPatientModal';
 import { GitHubReleaseModal } from './GitHubReleaseModal';
+import { AndroidPermissionsModal } from './AndroidPermissionsModal';
 import { calculateCrCl, analyzePatientSafety } from '../lib/clinical-engine';
 import { resolveLocalReference, exportLocalReferenceMarkdown } from '../lib/clinicalReferences';
+import { printOrSaveClinicalPdf, shareClinicalFile } from '../lib/androidPermissions';
 import { syncQueue } from '../lib/supabase/syncQueue';
 import { authService } from '../lib/supabase/auth';
+import { getActiveHospitalUser, subscribeHospitalUsers, HospitalUser } from '../lib/usersManager';
+import { ensureAllCoreBooksPreloadedOffline } from '../lib/googleDrive/embeddedBookCompiler';
 
 interface Props {
   patients: Patient[];
@@ -70,11 +78,20 @@ export function DashboardLayout({
   const [lang, setLang] = useState<Language>('ar');
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [activeTab, setActiveTab] = useState<
-    'patients' | 'reconciliation' | 'calculators' | 'alerts' | 'interventions' | 'guidelines' | 'training'
+    'patients' | 'reconciliation' | 'calculators' | 'alerts' | 'interventions' | 'guidelines' | 'training' | 'users_admin'
   >('patients');
   const [selectedWard, setSelectedWard] = useState<string>('all');
   const [selectedStatus, setSelectedStatus] = useState<'all' | PatientStatus>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [activeHospitalUser, setActiveHospitalUserState] = useState<HospitalUser>(() => getActiveHospitalUser());
+
+  useEffect(() => {
+    void ensureAllCoreBooksPreloadedOffline();
+    const unsub = subscribeHospitalUsers(() => {
+      setActiveHospitalUserState(getActiveHospitalUser());
+    });
+    return unsub;
+  }, []);
 
   // Modals
   const [isCopilotOpen, setIsCopilotOpen] = useState(false);
@@ -82,6 +99,7 @@ export function DashboardLayout({
   const [isNewPatientOpen, setIsNewPatientOpen] = useState(false);
   const [isSyncAuditOpen, setIsSyncAuditOpen] = useState(false);
   const [isGitHubReleaseOpen, setIsGitHubReleaseOpen] = useState(false);
+  const [isAndroidPermissionsOpen, setIsAndroidPermissionsOpen] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const [auditNotice, setAuditNotice] = useState<string | null>(null);
   const [activeLocalRefUri, setActiveLocalRefUri] = useState<string | null>(null);
@@ -184,7 +202,7 @@ export function DashboardLayout({
   };
 
   const isSafetyGroupActive = activeTab === 'alerts' || activeTab === 'interventions';
-  const isMoreGroupActive = activeTab === 'reconciliation' || activeTab === 'training';
+  const isMoreGroupActive = activeTab === 'reconciliation' || activeTab === 'training' || activeTab === 'users_admin';
 
   return (
     <div
@@ -215,7 +233,7 @@ export function DashboardLayout({
                     {t.tabs[activeTab]}
                   </span>
                   <span className="hidden md:inline">
-                    {t.hospitalName} • {t.dutyPharmacist}
+                    {t.hospitalName} • {lang === 'ar' ? activeHospitalUser.nameAr : activeHospitalUser.nameEn}
                   </span>
                 </p>
               </div>
@@ -224,12 +242,48 @@ export function DashboardLayout({
             {/* Right: Touch-Friendly Action Controls (Minimum 40x40px targets) */}
             <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
               <button
+                onClick={() => setActiveTab('users_admin')}
+                title={
+                  lang === 'ar'
+                    ? 'شاشة المستخدمين ومدير النظام: خالد الشرماني'
+                    : 'Users & System Administrator: Dr. Khaled Al-Shormani'
+                }
+                className={`flex items-center justify-center gap-1.5 min-h-[40px] px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs font-extrabold transition cursor-pointer ${
+                  activeTab === 'users_admin'
+                    ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-sm'
+                    : 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-800 dark:text-amber-300 border-amber-500/40'
+                }`}
+              >
+                <Crown className="w-4 h-4 text-amber-500 shrink-0" />
+                <span className="hidden sm:inline">
+                  {lang === 'ar'
+                    ? `مدير النظام: ${activeHospitalUser.isPrimarySystemAdmin ? 'خالد الشرماني' : activeHospitalUser.nameAr}`
+                    : `Admin: ${activeHospitalUser.isPrimarySystemAdmin ? 'Khaled Al-Shormani' : activeHospitalUser.nameEn}`}
+                </span>
+              </button>
+
+              <button
+                onClick={() => setIsAndroidPermissionsOpen(true)}
+                title={
+                  lang === 'ar'
+                    ? 'أذونات الأندرويد (الملفات، الطباعة PDF، المشاركة، الإنترنت)'
+                    : 'Android Permissions (Files, PDF Print, Share, Internet)'
+                }
+                className="flex items-center justify-center gap-1.5 min-h-[40px] px-2.5 sm:px-3 py-1.5 rounded-xl bg-teal-950/90 dark:bg-teal-950 hover:bg-teal-900 text-emerald-300 border border-teal-700/80 text-xs font-bold transition cursor-pointer"
+              >
+                <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span className="hidden lg:inline">
+                  {lang === 'ar' ? 'أذونات الأندرويد / PDF' : 'Android Permissions'}
+                </span>
+              </button>
+
+              <button
                 onClick={() => setIsGitHubReleaseOpen(true)}
                 title={lang === 'ar' ? 'تثبيت التطبيق وإصدار GitHub' : 'Install App & GitHub Release'}
                 className="flex items-center justify-center gap-1.5 min-h-[40px] px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 text-teal-300 border border-slate-700 text-xs font-bold transition cursor-pointer"
               >
                 <Download className="w-4 h-4 text-teal-400 shrink-0" />
-                <span className="hidden md:inline">
+                <span className="hidden xl:inline">
                   {lang === 'ar' ? 'تثبيت التطبيق / GitHub' : 'Install / GitHub'}
                 </span>
               </button>
@@ -374,11 +428,23 @@ export function DashboardLayout({
                 <GraduationCap className="w-3.5 h-3.5" />
                 {t.tabs.training}
               </button>
+
+              <button
+                onClick={() => setActiveTab('users_admin')}
+                className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-extrabold whitespace-nowrap transition ${
+                  activeTab === 'users_admin'
+                    ? 'bg-amber-500 text-slate-950 shadow-xs'
+                    : 'text-amber-700 dark:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30'
+                }`}
+              >
+                <Crown className="w-3.5 h-3.5" />
+                {t.tabs.users_admin}
+              </button>
             </nav>
           </div>
         </div>
 
-        {/* Mobile Sub-Switcher when inside grouped tabs (Safety/DRP or MedRec/Training) */}
+        {/* Mobile Sub-Switcher when inside grouped tabs (Safety/DRP or MedRec/Training/Users) */}
         {(isSafetyGroupActive || isMoreGroupActive) && (
           <div className="md:hidden border-t border-slate-100 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-900/90 px-3 py-1.5">
             {isSafetyGroupActive ? (
@@ -409,30 +475,41 @@ export function DashboardLayout({
                 </button>
               </div>
             ) : (
-              <div className="grid grid-cols-2 gap-1.5 bg-slate-200/70 dark:bg-slate-800 p-1 rounded-xl">
+              <div className="grid grid-cols-3 gap-1.5 bg-slate-200/70 dark:bg-slate-800 p-1 rounded-xl">
+                <button
+                  onClick={() => setActiveTab('users_admin')}
+                  className={`py-1.5 px-2 rounded-lg text-[11px] font-extrabold flex items-center justify-center gap-1 transition ${
+                    activeTab === 'users_admin'
+                      ? 'bg-amber-500 text-slate-950 shadow-xs'
+                      : 'text-slate-700 dark:text-slate-300'
+                  }`}
+                >
+                  <Crown className="w-3.5 h-3.5" />
+                  <span className="truncate">{lang === 'ar' ? 'مدير النظام: خالد الشرماني' : 'Admin & Users'}</span>
+                </button>
                 <button
                   onClick={() => setActiveTab('reconciliation')}
-                  className={`py-1.5 px-2 rounded-lg text-[11px] font-extrabold flex items-center justify-center gap-1.5 transition ${
+                  className={`py-1.5 px-2 rounded-lg text-[11px] font-extrabold flex items-center justify-center gap-1 transition ${
                     activeTab === 'reconciliation'
                       ? 'bg-white dark:bg-slate-900 text-teal-700 dark:text-teal-300 shadow-xs'
                       : 'text-slate-600 dark:text-slate-400'
                   }`}
                 >
                   <FileCheck className="w-3.5 h-3.5" />
-                  <span>
-                    {lang === 'ar' ? `المطابقة الدوائية MedRec (${discrepancies.length})` : `MedRec (${discrepancies.length})`}
+                  <span className="truncate">
+                    {lang === 'ar' ? `MedRec (${discrepancies.length})` : `MedRec (${discrepancies.length})`}
                   </span>
                 </button>
                 <button
                   onClick={() => setActiveTab('training')}
-                  className={`py-1.5 px-2 rounded-lg text-[11px] font-extrabold flex items-center justify-center gap-1.5 transition ${
+                  className={`py-1.5 px-2 rounded-lg text-[11px] font-extrabold flex items-center justify-center gap-1 transition ${
                     activeTab === 'training'
                       ? 'bg-white dark:bg-slate-900 text-teal-700 dark:text-teal-300 shadow-xs'
                       : 'text-slate-600 dark:text-slate-400'
                   }`}
                 >
                   <GraduationCap className="w-3.5 h-3.5" />
-                  <span>{lang === 'ar' ? 'حالات البورد (BCPS/BCCP)' : 'BCPS/BCCP Cases'}</span>
+                  <span className="truncate">{lang === 'ar' ? 'حالات البورد' : 'BCPS Cases'}</span>
                 </button>
               </div>
             )}
@@ -832,6 +909,9 @@ export function DashboardLayout({
             }}
           />
         )}
+
+        {/* TAB 8: Users & System Administrator Screen (خالد الشرماني) */}
+        {activeTab === 'users_admin' && <UsersAdminPanel lang={lang} />}
       </main>
 
       {/* Floating Copilot Trigger Button (Positioned above Android bottom nav on mobile) */}
@@ -930,21 +1010,21 @@ export function DashboardLayout({
             <span className="text-[10px] leading-tight truncate max-w-full">{t.mobileNav.alerts}</span>
           </button>
 
-          {/* 5. MedRec & Board Cases */}
+          {/* 5. Users Admin (Khaled Al-Shormani), MedRec & Board Cases */}
           <button
-            onClick={() => setActiveTab(activeTab === 'reconciliation' ? 'training' : 'reconciliation')}
+            onClick={() => setActiveTab(activeTab === 'users_admin' ? 'reconciliation' : 'users_admin')}
             className={`flex flex-col items-center justify-center gap-0.5 rounded-xl transition ${
               isMoreGroupActive
-                ? 'text-teal-600 dark:text-teal-400 font-extrabold'
+                ? 'text-amber-600 dark:text-amber-400 font-extrabold'
                 : 'text-slate-500 dark:text-slate-400 font-medium'
             }`}
           >
             <div
               className={`px-3 py-0.5 rounded-full transition ${
-                isMoreGroupActive ? 'bg-teal-100/80 dark:bg-teal-950/80' : ''
+                isMoreGroupActive ? 'bg-amber-100/80 dark:bg-amber-950/80' : ''
               }`}
             >
-              <FileCheck className="w-4 h-4" />
+              <Crown className="w-4 h-4" />
             </div>
             <span className="text-[10px] leading-tight truncate max-w-full">{t.mobileNav.more}</span>
           </button>
@@ -1221,18 +1301,33 @@ export function DashboardLayout({
                   type="button"
                   onClick={() => {
                     const md = exportLocalReferenceMarkdown(resolvedLocalRef.chapter, lang);
-                    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `clinpharm-local-ref-${resolvedLocalRef.chapter.id}.md`;
-                    a.click();
-                    URL.revokeObjectURL(url);
+                    printOrSaveClinicalPdf({
+                      title: lang === 'ar' ? resolvedLocalRef.chapter.titleAr : resolvedLocalRef.chapter.title,
+                      subtitle: `${resolvedLocalRef.source.title} (${resolvedLocalRef.chapter.pages})`,
+                      bodyMarkdownOrText: md,
+                      filenameBase: `clinpharm-ref-${resolvedLocalRef.chapter.id}`,
+                      dir: lang === 'ar' ? 'rtl' : 'ltr'
+                    });
                   }}
                   className="min-h-[40px] inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-100 text-slate-700 dark:text-slate-200 text-xs font-bold transition cursor-pointer"
                 >
-                  <FileDown className="w-3.5 h-3.5 text-teal-600" />
-                  <span>{lang === 'ar' ? 'تصدير الفصل محلياً (.md)' : 'Export Local (.md)'}</span>
+                  <Printer className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>{lang === 'ar' ? 'طباعة / PDF' : 'Print / PDF'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const md = exportLocalReferenceMarkdown(resolvedLocalRef.chapter, lang);
+                    void shareClinicalFile({
+                      filename: `clinpharm-local-ref-${resolvedLocalRef.chapter.id}.md`,
+                      title: lang === 'ar' ? resolvedLocalRef.chapter.titleAr : resolvedLocalRef.chapter.title,
+                      content: md
+                    });
+                  }}
+                  className="min-h-[40px] inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-100 text-slate-700 dark:text-slate-200 text-xs font-bold transition cursor-pointer"
+                >
+                  <Share2 className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>{lang === 'ar' ? 'مشاركة / تصدير' : 'Share / Export'}</span>
                 </button>
                 <button
                   type="button"
@@ -1491,6 +1586,13 @@ export function DashboardLayout({
         patients={patients}
         interventions={interventions}
         discrepancies={discrepancies}
+      />
+
+      {/* Android Permissions & Device Capabilities Modal */}
+      <AndroidPermissionsModal
+        isOpen={isAndroidPermissionsOpen}
+        onClose={() => setIsAndroidPermissionsOpen(false)}
+        lang={lang}
       />
     </div>
   );

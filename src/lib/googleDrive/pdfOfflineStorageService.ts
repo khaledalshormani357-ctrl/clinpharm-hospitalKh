@@ -224,9 +224,20 @@ export async function getOfflineVaultDiagnostics(): Promise<OfflineVaultDiagnost
 
 /**
  * Retrieves the cached PDF file from IndexedDB as a standard browser Blob.
+ * If not yet cached in IndexedDB, automatically compiles the built-in reference book PDF on the fly.
  */
 export async function getOfflinePdfBlob(bookId: string): Promise<Blob | null> {
-  const bytes = await getSyncedPdfBytes(bookId);
+  let bytes = await getSyncedPdfBytes(bookId);
+  if (!bytes || bytes.byteLength === 0) {
+    try {
+      const { compileEmbeddedBookToFullRecord } = await import('./embeddedBookCompiler');
+      const compiled = compileEmbeddedBookToFullRecord(bookId);
+      await saveSyncedFullBook(compiled.record, compiled.pdfBytes);
+      bytes = compiled.pdfBytes;
+    } catch {
+      return null;
+    }
+  }
   if (!bytes || bytes.byteLength === 0) return null;
   return new Blob([bytes], { type: 'application/pdf' });
 }
@@ -245,11 +256,11 @@ export async function createOfflinePdfObjectUrl(bookId: string): Promise<string 
  * Triggers a direct 100% offline download of the cached PDF from IndexedDB to the user's device.
  */
 export async function downloadOfflinePdfFromVault(bookId: string): Promise<boolean> {
-  const books = getSyncedFullBooksSync();
-  const book = books.find(b => b.bookId === bookId);
   const blob = await getOfflinePdfBlob(bookId);
   if (!blob) return false;
 
+  const books = getSyncedFullBooksSync();
+  const book = books.find(b => b.bookId === bookId);
   const rawName = book?.fileName || `${bookId}.pdf`;
   const safeFileName = rawName.toLowerCase().endsWith('.pdf') ? rawName : `${rawName}.pdf`;
 

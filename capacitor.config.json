@@ -2,6 +2,16 @@
   "appId": "com.clinpharm.hospital",
   "appName": "ClinPharm Hospital",
   "webDir": "dist",
+  "android": {
+    "allowMixedContent": true,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": true,
+    "backgroundColor": "#0b3433"
+  },
+  "server": {
+    "androidScheme": "https",
+    "cleartext": true
+  },
   "plugins": {
     "SplashScreen": {
       "launchAutoHide": true,
@@ -10,3 +20,4 @@
     }
   }
 }
+

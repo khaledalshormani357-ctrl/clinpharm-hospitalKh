@@ -41,8 +41,11 @@ import {
   ExternalLink,
   BookMarked,
   CloudDownload,
-  FileText
+  FileText,
+  Printer,
+  Share2
 } from 'lucide-react';
+import { printOrSaveClinicalPdf, shareClinicalFile } from '../../lib/androidPermissions';
 
 interface Props {
   lang: Language;
@@ -64,7 +67,13 @@ export function ClinicalLibraryViewer({
   const [pageJumpInput, setPageJumpInput] = useState<string>('');
 
   useEffect(() => {
-    void hydrateSyncedFullBooks().then(() => {
+    void hydrateSyncedFullBooks().then(async records => {
+      if (records.length < 7) {
+        const { ensureAllCoreBooksPreloadedOffline } = await import(
+          '../../lib/googleDrive/embeddedBookCompiler'
+        );
+        await ensureAllCoreBooksPreloadedOffline(false);
+      }
       setLibraryVersion(v => v + 1);
     });
     const handleFullBooksUpdated = () => {
@@ -184,6 +193,27 @@ export function ClinicalLibraryViewer({
     URL.revokeObjectURL(url);
   };
 
+  const handlePrintChapterPdf = () => {
+    const text = exportChapterMarkdown(activeChapter);
+    printOrSaveClinicalPdf({
+      title: activeChapter.title,
+      subtitle: `${activeBook.title} (${activeBook.edition}) • Pages ${activeChapter.pageRange}`,
+      bodyMarkdownOrText: text,
+      filenameBase: `${activeChapter.id}-monograph`,
+      dir: 'ltr'
+    });
+  };
+
+  const handleShareChapter = () => {
+    const text = exportChapterMarkdown(activeChapter);
+    void shareClinicalFile({
+      filename: `${activeChapter.id}-verbatim-monograph.md`,
+      title: `${activeChapter.title} (${activeBook.title})`,
+      summaryText: activeChapter.citation,
+      content: text
+    });
+  };
+
   const handleAskCopilotCurrentChapter = () => {
     if (!onAskCopilot) return;
     const prompt =
@@ -260,13 +290,24 @@ export function ClinicalLibraryViewer({
           </button>
           <button
             type="button"
-            onClick={handleExportMarkdown}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-teal-700/50 hover:bg-teal-700 text-teal-100 border border-teal-500/30 text-xs font-bold transition cursor-pointer"
-            title="Export Monograph as Markdown"
+            onClick={handlePrintChapterPdf}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600/40 hover:bg-indigo-600/60 text-indigo-100 border border-indigo-400/40 text-xs font-bold transition cursor-pointer"
+            title="Print or Save Chapter as PDF"
           >
-            <FileDown className="w-3.5 h-3.5" />
+            <Printer className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">
-              {lang === 'ar' ? 'تصدير الفصل (.md)' : 'Export Markdown'}
+              {lang === 'ar' ? 'طباعة / PDF' : 'Print / PDF'}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={handleShareChapter}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-teal-700/50 hover:bg-teal-700 text-teal-100 border border-teal-500/30 text-xs font-bold transition cursor-pointer"
+            title="Share or Export Chapter File"
+          >
+            <Share2 className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">
+              {lang === 'ar' ? 'مشاركة / تصدير' : 'Share / Export'}
             </span>
           </button>
           <button

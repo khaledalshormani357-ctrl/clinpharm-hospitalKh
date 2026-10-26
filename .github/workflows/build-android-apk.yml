@@ -54,6 +54,7 @@ jobs:
           rm -rf android
           npx cap add android
           npx cap sync android
+          node scripts/configure-android-permissions.mjs
 
       - name: Build Android APK via Gradle
         working-directory: ./android

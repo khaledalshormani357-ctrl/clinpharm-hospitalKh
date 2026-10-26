@@ -3,7 +3,7 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -49,56 +49,64 @@ async function startServer() {
       liveAiReady: true,
       hasApiKey: hasKey,
       model: 'gemini-3-flash-preview',
+      mode: 'NotebookLM Strict Reference Grounding',
       libraryBooksCount: 7,
       libraryChaptersCount: 47
     });
   });
 
-  function buildInstantClinicalSynthesis(
+  function extractGroundedSourceSynthesis(
     query: string,
     lang: 'ar' | 'en',
     patientContext: string,
     referenceContext: string,
     verbatimLibraryContext: string
   ): string {
-    const firstVerbatimBlock = verbatimLibraryContext
-      ? verbatimLibraryContext.split('\n\n---\n\n').slice(0, 3).join('\n\n')
-      : '';
-    const refExcerpt = referenceContext
-      ? referenceContext.split('\n').slice(0, 18).join('\n')
-      : '';
+    const sourceBlocks = verbatimLibraryContext
+      ? verbatimLibraryContext
+          .split(/\n*========================================\n*/)
+          .map(b => b.trim())
+          .filter(Boolean)
+          .slice(0, 4)
+      : [];
 
     if (lang === 'ar') {
-      return `### 🩺 التحليل الإكلينيكي الفوري المخصص للمريض (ClinPharm AI & Verbatim Library Engine)
-
-**السؤال السريري:** ${query}
-
-#### 1. تقييم حالة المريض النشط والمؤشرات الحيوية والمخبرية (Patient-Specific PK/PD Context):
-${patientContext || 'لم يتم تحديد مريض نشط؛ يتم الاستناد إلى البروتوكولات المرجعية القياسية.'}
-
-#### 2. التوصيات العلاجية وفحص التعارضات الدوائية (Stockley’s DDI & Guidelines Synthesis):
-- **فحص التداخلات الدوائية (Stockley’s Drug Interactions — Ref: 1eg07NXxWYgJq0NxLf0Vim1JlV7KTu16S):**
-  - تحقق دائماً من التداخلات الممنوعة قطعياً (**Contraindicated**): مثل الجمع بين **ACEi + Sacubitril/Valsartan (Entresto)** بدون فترة غسيل **36-hour washout**، أو **Meropenem + Valproic Acid** (هبوط الفالبروات بنسبة 60–90% خلال 24 ساعة)، أو **Linezolid + SSRIs/Fentanyl** (خطر Serotonin Syndrome).
-  - تحقق من التداخلات الكبرى التي تتطلب تعديل الجرعة أو استبدال الدواء: مثل **Warfarin + Amiodarone/Fluconazole** (خفّض جرعة Warfarin بنسبة 30–50% استباقياً)، **Clopidogrel + Omeprazole** (استبدل بـ **Pantoprazole 40 mg**)، و**Vancomycin + Piperacillin/Tazobactam** (استبدل بـ **Cefepime** أو طبّق مراقبة صارمة لـ **AUC24/MIC 400–600 mg·h/L** مع فحص SCr يومياً).
-
-#### 3. المقتطفات المرجعية الحرفية المطابقة من المكتبة المدمجة (DiPiro 13th • ACCP 2026 • Stockley’s DDI):
-${firstVerbatimBlock || refExcerpt || 'جميع المراجع السبعة (47 فصلاً) مفهرسة محلياً.'}`;
+      const parts: string[] = [
+        `### 📚 الإجابة المرجعية الموثّقة (NotebookLM Verbatim Reference Extraction)`,
+        `> **الاستفسار السريري:** ${query}`,
+        ''
+      ];
+      if (referenceContext && referenceContext.trim()) {
+        parts.push(`#### ⚠️ مطابقة قاعدة بيانات التداخلات الدوائية (Stockley’s Drug Interactions):`);
+        parts.push(referenceContext.trim());
+        parts.push('');
+      }
+      if (sourceBlocks.length > 0) {
+        parts.push(`#### 📖 المقتطفات الحرفية المباشرة من المراجع المعتمدة:`);
+        parts.push(sourceBlocks.join('\n\n---\n\n'));
+      } else if (patientContext) {
+        parts.push(`#### 🩺 معطيات المريض النشط:\n${patientContext}`);
+      }
+      return parts.join('\n');
     }
 
-    return `### 🩺 Patient-Tailored Clinical Pharmacy Synthesis (ClinPharm AI & Verbatim Library)
-
-**Clinical Query:** ${query}
-
-#### 1. Active Inpatient Profile & PK/PD Parameters:
-${patientContext || 'No active inpatient selected; applying standard board-certified hospital protocols.'}
-
-#### 2. Evidence-Based Recommendations & Stockley’s DDI Screening:
-- **Stockley’s Drug Interactions Check (Drive Ref: 1eg07NXxWYgJq0NxLf0Vim1JlV7KTu16S):**
-  - Screen for **Contraindicated** combinations: **ACEi + Sacubitril/Valsartan** (mandatory 36-hour washout), **Carbapenems + Valproic Acid** (60–90% drop in valproate levels within 24h), and **Linezolid + Serotonergic agents**.
-  - Screen for **Major Action Required** interactions: **Warfarin + CYP2C9 inhibitors** (empirically reduce Warfarin by 30–50%), **Clopidogrel + Omeprazole** (switch to **Pantoprazole**), and **Vancomycin + Piperacillin/Tazobactam** (prefer **Cefepime** or monitor **AUC24/MIC 400–600 mg·h/L** and daily SCr).
-
-#### 3. Matched Verbatim Textbook Excerpts (DiPiro 13th • ACCP 2026 • Stockley’s DDI):
-${firstVerbatimBlock || refExcerpt || 'All 7 reference books (47 chapters) indexed.'}`;
+    const parts: string[] = [
+      `### 📚 NotebookLM Verbatim Reference Extraction`,
+      `> **Clinical Query:** ${query}`,
+      ''
+    ];
+    if (referenceContext && referenceContext.trim()) {
+      parts.push(`#### ⚠️ Matched Stockley’s Drug Interactions Monographs:`);
+      parts.push(referenceContext.trim());
+      parts.push('');
+    }
+    if (sourceBlocks.length > 0) {
+      parts.push(`#### 📖 Verbatim Evidence from Accredited Textbooks:`);
+      parts.push(sourceBlocks.join('\n\n---\n\n'));
+    } else if (patientContext) {
+      parts.push(`#### 🩺 Active Patient Context:\n${patientContext}`);
+    }
+    return parts.join('\n');
   }
 
   app.post('/api/copilot/chat', async (req, res) => {
@@ -119,7 +127,7 @@ ${firstVerbatimBlock || refExcerpt || 'All 7 reference books (47 chapters) index
 
       const apiKey = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
       if (!apiKey) {
-        const synthesized = buildInstantClinicalSynthesis(
+        const synthesized = extractGroundedSourceSynthesis(
           query.trim(),
           lang,
           patientContext,
@@ -128,8 +136,8 @@ ${firstVerbatimBlock || refExcerpt || 'All 7 reference books (47 chapters) index
         );
         res.json({
           text: synthesized,
-          model: 'ClinPharm Local Clinical Engine + Stockley DDI',
-          liveAi: true
+          model: 'NotebookLM Verbatim Engine',
+          liveAi: false
         });
         return;
       }
@@ -143,29 +151,36 @@ ${firstVerbatimBlock || refExcerpt || 'All 7 reference books (47 chapters) index
         }
       });
 
-      const systemInstruction = `You are "ClinPharm AI Copilot", a Senior Board-Certified Clinical Pharmacy & Critical Care Specialist (PharmD, BCPS, BCCCP, BCCP) integrated inside a hospital clinical workstation.
-You have full access to:
-1. ACTIVE INPATIENT CHART & LABS (including custom laboratory tests):
+      const systemInstruction = `You are "ClinPharm NotebookLM AI", a strict Source-Grounded Clinical Pharmacy Reference Analyst (modeled after Google NotebookLM) for board-certified hospital pharmacists (PharmD, BCPS, BCCCP, BCCP).
+
+CRITICAL NOTEBOOK-AI GROUNDING RULES (ZERO HALLUCINATION POLICY):
+1. STRICT SOURCE GROUNDING ONLY: You MUST answer strictly and exclusively from the provided NUMBERED ACCREDITED REFERENCE SOURCES ([SOURCE 1], [SOURCE 2], ...), the MATCHED STOCKLEY'S DRUG INTERACTIONS MONOGRAPHS, and the ACTIVE INPATIENT CHART below. Do NOT invent, guess, or fabricate any drug doses, mechanisms, or references from outside the provided sources.
+2. MANDATORY INLINE NUMBERED CITATIONS: Every clinical statement, dose, renal/hepatic cutoff, pharmacokinetic formula, or drug interaction mechanism in your answer MUST include an inline citation marker in brackets pointing to the exact source, e.g., [1], [2], [Stockley's DDI, Sec. 1.1], [DiPiro 13th Ed, Ch. 15].
+3. EXACT NUMERICAL PRECISION: Quote the exact numerical doses, infusion rate ceilings (e.g., KCl peripheral max 10 mEq/h), washout periods (e.g., 36-hour washout from ACEi to Sacubitril/Valsartan), Cockcroft-Gault CrCl cutoffs, Stockley's Action Ratings (Contraindicated / Severe / Major), and TDM targets (e.g., Vancomycin AUC24/MIC 400–600 mg·h/L) directly from the provided verbatim text and tables.
+4. PATIENT-SPECIFIC APPLICATION: When the question asks about the active patient (or when the cited drugs/conditions apply to the active patient), apply the cited reference rules directly to the patient's exact CrCl, K+, Na+, INR, custom laboratory tests, allergies, and active medication list.
+5. END-OF-ANSWER CITED SOURCES LIST: Conclude your response with a clear section titled "${
+        lang === 'ar' ? 'المراجع الموثّقة المقتبسة (Cited Reference Sources):' : 'Cited Reference Sources:'
+      }" listing each numbered source [1], [2], ... with its exact Book Title, Chapter/Section, and Page Range.
+6. LANGUAGE & CLINICAL STYLE: ${
+        lang === 'ar'
+          ? 'Respond in clear, structured, professional "Medical Mix" (authoritative Arabic clinical prose while keeping drug names, enzyme/transporter names like CYP2C9/CYP3A4/P-gp, clinical trials, equations, and medical abbreviations in English).'
+          : 'Respond in clear, structured, authoritative clinical English.'
+      }
+
+========================================
+ACTIVE INPATIENT CHART & LABS:
 ${patientContext || 'No specific inpatient selected.'}
 
-2. MATCHED CLINICAL REFERENCE DATABASE & CASEBOOK PROTOCOLS:
-${referenceContext || 'Standard hospital references loaded.'}
+========================================
+MATCHED STOCKLEY'S DRUG INTERACTIONS & CLINICAL DATABASE:
+${referenceContext || 'See numbered verbatim sources below.'}
 
-3. VERBATIM UNABRIDGED TEXTBOOK EXCERPTS (DiPiro 13th Ed, ACCP Cardiology 2026, ACCP Updates 2026 Vol 1 & Vol 2, Pharmacotherapy Casebook PPCP Guide, Hospital Dosing Compendium, Stockley's Drug Interactions [Drive ID: 1eg07NXxWYgJq0NxLf0Vim1JlV7KTu16S]):
-${verbatimLibraryContext || 'All 7 reference books (47 chapters) indexed.'}
-
-CRITICAL CLINICAL & FORMATTING DIRECTIVES:
-- Provide real, deep, patient-specific clinical reasoning grounded in the active patient's exact CrCl, serum potassium, sodium, liver function, custom lab results, allergies, hemodynamic status, and medication list, as well as the verbatim textbook excerpts above.
-- Always state exact numerical drug doses, routes, infusion rates, renal/hepatic cutoff rules, Stockley's Drug Interaction action ratings, and therapeutic drug monitoring (TDM) targets (e.g., Vancomycin AUC24/MIC 400-600 mg*h/L, Apixaban 2-of-3 ABC criteria, 36-hour washout for ACEi to Entresto, KCl peripheral max 10 mEq/h).
-- Cite the exact book and chapter from the in-app library (e.g., [Stockley's Drug Interactions, Sec. 1-3], [DiPiro's 13th Ed, Ch. 15/32], [ACCP Cardiology 2026, BCCP Ch. 3], [ACCP 2026 Vol 1, Ch. 6], [ACCP 2026 Vol 2, Ch. 16], [Casebook PPCP Guide, Sec. II]).
-- Language Rule: ${
-        lang === 'ar'
-          ? 'Respond in "Medical Mix" (Professional Arabic clinical syntax while keeping drug names, clinical trials, equations, and medical abbreviations in English, e.g., Vancomycin, CrCl, AUC24/MIC, HFrEF, Stockley DDI, SOAP Note).'
-          : 'Respond in clear, authoritative clinical English.'
-      }`;
+========================================
+NUMBERED VERBATIM TEXTBOOK SOURCES ([SOURCE 1] .. [SOURCE N]):
+${verbatimLibraryContext || 'All 7 reference books (47 chapters) indexed.'}`;
 
       const contents = [
-        ...history.slice(-6).map(turn => ({
+        ...history.slice(-4).map(turn => ({
           role: turn.role === 'assistant' ? 'model' : 'user',
           parts: [{ text: turn.text }]
         })),
@@ -187,12 +202,20 @@ CRITICAL CLINICAL & FORMATTING DIRECTIVES:
 
       for (const modelName of candidateModels) {
         try {
+          const isGemini3 = modelName.startsWith('gemini-3');
           const response = await ai.models.generateContent({
             model: modelName,
             contents,
             config: {
               systemInstruction,
-              temperature: 0.25
+              temperature: 0.1,
+              ...(isGemini3
+                ? {
+                    thinkingConfig: {
+                      thinkingLevel: ThinkingLevel.LOW
+                    }
+                  }
+                : {})
             }
           });
           const text = response.text?.trim() || '';
@@ -201,20 +224,20 @@ CRITICAL CLINICAL & FORMATTING DIRECTIVES:
             usedModel = modelName;
             break;
           }
-        } catch {
-          // Immediately try next fast model in fallback chain
+        } catch (err) {
+          console.warn(`Model ${modelName} attempt failed, trying next:`, err instanceof Error ? err.message : err);
         }
       }
 
       if (!replyText) {
-        replyText = buildInstantClinicalSynthesis(
+        replyText = extractGroundedSourceSynthesis(
           query.trim(),
           lang,
           patientContext,
           referenceContext,
           verbatimLibraryContext
         );
-        usedModel = 'ClinPharm Clinical Engine (Fast Fallback)';
+        usedModel = 'NotebookLM Verbatim Extractor';
       }
 
       res.json({

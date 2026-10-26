@@ -20,10 +20,13 @@ import {
   HeartPulse,
   ClipboardList,
   FlaskConical,
-  Trash2
+  Trash2,
+  Printer,
+  Share2
 } from 'lucide-react';
 import { calculateCrCl, analyzePatientSafety } from '../lib/clinical-engine';
 import { buildSimulatorParamsFromPatient, simulateCaseWithReferences } from '../lib/clinicalReferences';
+import { printOrSaveClinicalPdf, shareClinicalFile } from '../lib/androidPermissions';
 import { translations } from '../lib/i18n';
 
 interface Props {
@@ -240,6 +243,27 @@ export function PatientDetailsModal({
     URL.revokeObjectURL(url);
   };
 
+  const handlePrintCaseReportPdf = () => {
+    const md = buildCaseReportMarkdown();
+    printOrSaveClinicalPdf({
+      title: `Case Report: ${patient.name} (${patient.nameEn}) — ${patient.mrn}`,
+      subtitle: `${patient.ward} • Room ${patient.room} (${patient.bed}) • CrCl ${crclCalc.crcl} mL/min`,
+      bodyMarkdownOrText: md,
+      filenameBase: `CaseReport_${patient.mrn}_${patient.nameEn.replace(/\s+/g, '_')}`,
+      dir: 'ltr'
+    });
+  };
+
+  const handleShareCaseReport = () => {
+    const md = buildCaseReportMarkdown();
+    void shareClinicalFile({
+      filename: `CaseReport_${patient.mrn}_${patient.nameEn.replace(/\s+/g, '_')}.md`,
+      title: `Clinical Case Report — ${patient.name} (${patient.mrn})`,
+      summaryText: `e-Casebook Pharmacotherapy Report for ${patient.name} (${patient.mrn})`,
+      content: md
+    });
+  };
+
   const headerStatusClass =
     patient.status === 'critical'
       ? 'bg-rose-500 text-white'
@@ -401,17 +425,31 @@ export function PatientDetailsModal({
                       : 'Complete Clinical Case Report (Demographics, CC, HOP/HPI, MH, ROS, Objective Vitals/PE, Labs & Care Plan)'}
                   </h4>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <button
+                    onClick={handlePrintCaseReportPdf}
+                    className="px-3 py-1.5 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold text-[11px] flex items-center gap-1.5 transition cursor-pointer"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>{lang === 'ar' ? 'طباعة / PDF' : 'Print / PDF'}</span>
+                  </button>
+                  <button
+                    onClick={handleShareCaseReport}
+                    className="px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/40 text-emerald-200 font-bold text-[11px] flex items-center gap-1.5 transition cursor-pointer"
+                  >
+                    <Share2 className="w-3.5 h-3.5" />
+                    <span>{lang === 'ar' ? 'مشاركة الملف' : 'Share File'}</span>
+                  </button>
                   <button
                     onClick={handleCopyCaseReport}
-                    className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-[11px] flex items-center gap-1.5 transition"
+                    className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-[11px] flex items-center gap-1.5 transition cursor-pointer"
                   >
                     {copiedCaseReport ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                     <span>{copiedCaseReport ? (lang === 'ar' ? 'تم النسخ!' : 'Copied!') : lang === 'ar' ? 'نسخ التقرير' : 'Copy Report'}</span>
                   </button>
                   <button
                     onClick={handleDownloadCaseReport}
-                    className="px-3 py-1.5 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold text-[11px] flex items-center gap-1.5 transition"
+                    className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-[11px] flex items-center gap-1.5 transition cursor-pointer"
                   >
                     <Download className="w-3.5 h-3.5" />
                     <span>{lang === 'ar' ? 'تنزيل (.md)' : 'Export (.md)'}</span>
