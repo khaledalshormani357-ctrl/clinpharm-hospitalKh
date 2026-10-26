@@ -28,6 +28,7 @@ import {
   MatchedStockleyDdi
 } from '../lib/notebookLmEngine';
 import { hydrateSyncedFullBooks } from '../lib/googleDrive/fullBookIdb';
+import { supabase } from '../lib/supabase/client';
 
 interface Message {
   id: string;
@@ -187,6 +188,8 @@ Ask any clinical pharmacotherapy, renal/hepatic dosing, or Stockley’s DDI ques
       // 1. Run NotebookLM Deep Multi-Token Bilingual Reference Retrieval across all 7 books (47+ chapters) & Stockley's DDI DB
       const groundingBundle = buildNotebookLmGrounding(currentInput, lang, currentPatient);
 
+      const sessionResult = await supabase?.auth.getSession();
+      const accessToken = sessionResult?.data.session?.access_token;
       const requestPayload = {
         query: currentInput,
         lang,
@@ -214,7 +217,8 @@ Ask any clinical pharmacotherapy, renal/hepatic dosing, or Stockley’s DDI ques
           const response = await fetch(endpoint, {
             method: 'POST',
             headers: {
-              'Content-Type': 'application/json'
+              'Content-Type': 'application/json',
+              ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {})
             },
             body: JSON.stringify(requestPayload),
             signal: ctrl.signal
