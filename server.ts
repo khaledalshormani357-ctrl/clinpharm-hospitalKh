@@ -10,15 +10,9 @@ const __dirname = path.dirname(__filename);
 
 const PORT = Number(process.env.PORT) || 3000;
 
-interface ChatHistoryTurn {
-  role: 'user' | 'assistant';
-  text: string;
-}
-
 interface CopilotChatRequestBody {
   query: string;
   lang?: 'ar' | 'en';
-  history?: ChatHistoryTurn[];
   patientContext?: string;
   referenceContext?: string;
   verbatimLibraryContext?: string;
