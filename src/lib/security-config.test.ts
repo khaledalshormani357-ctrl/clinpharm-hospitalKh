@@ -51,6 +51,15 @@ describe("security configuration regression checks", () => {
     expect(component).toContain("Authorization: `Bearer ${accessToken}`");
   });
 
+  it("bounds clinical copilot query and reference context sizes", () => {
+    const server = read("server.ts");
+    expect(server).toContain("typeof query !== 'string'");
+    expect(server).toContain("query.length > 12000");
+    expect(server).toContain("typeof value !== 'string'");
+    expect(server).toContain("contextBytes > 2 * 1024 * 1024");
+    expect(server).toContain("new URL('/auth/v1/user', supabaseUrl)");
+  });
+
   it("does not use a VITE-prefixed Gemini key on the server and documents strict CORS origins", () => {
     const server = read("server.ts");
     const env = read(".env.example");
