@@ -1,6 +1,6 @@
 export interface SupabaseAccessTokenVerification {
   authenticated: boolean;
-  status: 401 | 503;
+  status: 200 | 401 | 503;
   userId?: string;
   error: string;
 }
@@ -69,7 +69,7 @@ export async function verifySupabaseAccessToken(
       };
     }
 
-    return { authenticated: true, status: 401, userId: user.id, error: '' };
+    return { authenticated: true, status: 200, userId: user.id, error: '' };
   } catch {
     return {
       authenticated: false,
