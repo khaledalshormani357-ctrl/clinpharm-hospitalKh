@@ -46,7 +46,7 @@ async function startServer() {
     const hasKey = Boolean(process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY);
     res.json({
       ok: true,
-      liveAiReady: true,
+      liveAiReady: hasKey,
       hasApiKey: hasKey,
       model: 'gemini-3-flash-preview',
       mode: 'NotebookLM Strict Reference Grounding',
@@ -199,6 +199,7 @@ ${verbatimLibraryContext || 'All 7 reference books (47 chapters) indexed.'}`;
 
       let replyText = '';
       let usedModel = candidateModels[0];
+      let liveAi = false;
 
       for (const modelName of candidateModels) {
         try {
@@ -222,6 +223,7 @@ ${verbatimLibraryContext || 'All 7 reference books (47 chapters) indexed.'}`;
           if (text) {
             replyText = text;
             usedModel = modelName;
+            liveAi = true;
             break;
           }
         } catch (err) {
@@ -243,13 +245,13 @@ ${verbatimLibraryContext || 'All 7 reference books (47 chapters) indexed.'}`;
       res.json({
         text: replyText,
         model: usedModel,
-        liveAi: true
+        liveAi
       });
     } catch (error: unknown) {
       const errMessage = error instanceof Error ? error.message : 'Unknown Gemini API error';
       console.error('Error in /api/copilot/chat:', errMessage);
       res.status(500).json({
-        error: errMessage
+        error: 'Clinical copilot request failed. Please retry or contact the system administrator.'
       });
     }
   });
