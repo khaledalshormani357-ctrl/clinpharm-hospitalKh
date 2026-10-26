@@ -177,13 +177,7 @@ Ask any clinical pharmacotherapy, renal/hepatic dosing, or Stockley’s DDI ques
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
 
-    const historyForApi = messages
-      .filter(m => !m.isError)
-      .slice(-4)
-      .map(m => ({
-        role: m.sender,
-        text: m.text
-      }));
+    // Do not transmit prior chat turns by default; they may contain patient identifiers.
 
     setMessages(prev => [...prev, userMsg]);
     setInput('');
@@ -196,7 +190,7 @@ Ask any clinical pharmacotherapy, renal/hepatic dosing, or Stockley’s DDI ques
       const requestPayload = {
         query: currentInput,
         lang,
-        history: historyForApi,
+        history: [],
         patientContext: groundingBundle.patientContext,
         referenceContext: groundingBundle.referenceContext,
         verbatimLibraryContext: groundingBundle.notebookSourcesContext
