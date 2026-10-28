@@ -43,7 +43,7 @@ describe("security configuration regression checks", () => {
   it("requires a verified Supabase access token before serving clinical copilot requests", () => {
     const server = read("server.ts");
     const component = read("src/components/CopilotDialog.tsx");
-    expect(server).toContain("Clinical copilot authentication is not configured.");
+    expect(read("server/supabaseAuth.ts")).toContain("Clinical copilot authentication is not configured.");
     expect(read("server/supabaseAuth.ts")).toContain("/auth/v1/user");
     expect(server).toContain("Your session is invalid or expired.");
     expect(server).toContain("SUPABASE_ANON_KEY");
