@@ -45,7 +45,7 @@ describe("security configuration regression checks", () => {
     const component = read("src/components/CopilotDialog.tsx");
     expect(read("server/supabaseAuth.ts")).toContain("Clinical copilot authentication is not configured.");
     expect(read("server/supabaseAuth.ts")).toContain("/auth/v1/user");
-    expect(server).toContain("Your session is invalid or expired.");
+    expect(read("server/supabaseAuth.ts")).toContain("Your session is invalid or expired.");
     expect(server).toContain("SUPABASE_ANON_KEY");
     expect(component).toContain("supabase?.auth.getSession()");
     expect(component).toContain("Authorization: `Bearer ${accessToken}`");
