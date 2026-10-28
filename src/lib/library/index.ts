@@ -195,22 +195,48 @@ const CHAPTER_ID_ALIAS_MAP: Record<string, string> = {
 export function getAllVerbatimBooks(): VerbatimBook[] {
   const syncedRecords = getSyncedFullBooksSync();
   if (syncedRecords.length === 0) {
-    return VERBATIM_BOOKS;
+    return VERBATIM_BOOKS.map(b => ({
+      ...b,
+      sourceType: 'embedded_synthetic',
+      processingStatus: 'not_imported'
+    }));
   }
 
   const mergedBooks: VerbatimBook[] = VERBATIM_BOOKS.map(baseBook => {
     const synced = syncedRecords.find(r => r.bookId === baseBook.id);
-    if (!synced) return baseBook;
+    if (!synced) {
+      return {
+        ...baseBook,
+        sourceType: 'embedded_synthetic',
+        processingStatus: 'not_imported'
+      };
+    }
 
     const extraChapters = synced.chapters.filter(
       sc => !baseBook.chapters.some(bc => bc.id === sc.id)
     );
 
+    const isEmbedded = synced.sourceType === 'embedded_synthetic';
+    const statusLabel = isEmbedded
+      ? 'Embedded Offline Summary — NOT the original PDF'
+      : synced.processingStatus === 'verified_complete'
+      ? `Verified Complete PDF (${synced.totalPages} Pages)`
+      : synced.processingStatus === 'needs_ocr'
+      ? `Scanned PDF — Needs OCR (${synced.totalPages} Pages)`
+      : `Partially Extracted PDF (${synced.extractedTextPageCount ?? 0}/${synced.totalPages} Pages)`;
+
     return {
       ...baseBook,
-      edition: synced.sourceType === 'embedded_synthetic'
-        ? `${baseBook.edition} • Embedded Offline Summary — NOT the original PDF`
-        : `${baseBook.edition} • Verified PDF Imported (${synced.totalPages} Pages)`,
+      edition: `${baseBook.edition} • ${statusLabel}`,
+      sourceType: synced.sourceType,
+      processingStatus: synced.processingStatus,
+      sourceFileName: synced.sourceFileName || synced.fileName,
+      sha256: synced.sha256,
+      originalPageCount: synced.originalPageCount ?? synced.totalPages,
+      processedPageCount: synced.processedPageCount,
+      extractedTextPageCount: synced.extractedTextPageCount,
+      ocrPageCount: synced.ocrPageCount,
+      unprocessedPageCount: synced.unprocessedPageCount,
       chapters: extraChapters.length > 0 ? [...baseBook.chapters, ...extraChapters] : baseBook.chapters
     };
   });
@@ -219,26 +245,41 @@ export function getAllVerbatimBooks(): VerbatimBook[] {
   for (const synced of syncedRecords) {
     const existsInCore = mergedBooks.some(b => b.id === synced.bookId);
     if (!existsInCore) {
+      const isEmbedded = synced.sourceType === 'embedded_synthetic';
+      const titleText = synced.displayTitle || synced.customTitle || synced.sourceFileName || synced.fileName;
       mergedBooks.push({
         id: synced.bookId,
-        title: synced.customTitle || synced.fileName,
-        titleAr: `مرجع مستورد بالكامل: ${synced.customTitle || synced.fileName}`,
-        subtitle: synced.sourceType === 'embedded_synthetic'
+        title: titleText,
+        titleAr: isEmbedded
+          ? `ملخص مضمّن غير أصلي: ${titleText}`
+          : `مرجع PDF مستورد: ${titleText}`,
+        subtitle: isEmbedded
           ? 'Embedded offline summary; not the original PDF'
-          : `Imported PDF (${synced.totalPages} Pages • ${synced.totalChapters} Chapters)`,
-        subtitleAr: synced.sourceType === 'embedded_synthetic'
+          : `Imported PDF (${synced.totalPages} Pages • ${synced.totalChapters} Chapters • Status: ${synced.processingStatus || 'partially_complete'})`,
+        subtitleAr: isEmbedded
           ? 'ملخص مضمّن للعمل دون اتصال؛ ليس ملف PDF الأصلي'
-          : `ملف PDF مستورد (${synced.totalPages} صفحة • ${synced.totalChapters} فصلاً)`,
-        edition: synced.sourceType === 'embedded_synthetic'
+          : `ملف PDF مستورد (${synced.totalPages} صفحة • ${synced.totalChapters} فصلاً • الحالة: ${synced.processingStatus || 'partially_complete'})`,
+        edition: isEmbedded
           ? 'Embedded Offline Summary — NOT the original PDF'
-          : `Imported PDF (${synced.totalPages} Pages)`,
-        editors: 'Google Drive Synced Textbook',
-        publisher: 'Google Drive / Local Full PDF Import',
-        isbnOrUan: `Drive ID: ${synced.driveFileId}`,
-        badge: synced.customBadge || synced.fileName.slice(0, 22),
-        badgeAr: synced.customBadge || synced.fileName.slice(0, 22),
-        description: `Complete verbatim page-by-page extraction of ${synced.fileName} (${synced.totalPages} pages).`,
-        descriptionAr: `النص الكامل المستخرج صفحة بصفحة (100% من الصفحات حرفياً) لملف ${synced.fileName}.`,
+          : synced.processingStatus === 'verified_complete'
+          ? `Verified Complete PDF (${synced.totalPages} Pages)`
+          : `Imported PDF (${synced.totalPages} Pages • ${synced.processingStatus || 'partially_complete'})`,
+        editors: isEmbedded ? 'Built-in Summary' : 'Original PDF Textbook',
+        publisher: synced.sourceType === 'local_file_pdf' ? 'Local PDF Import' : 'Google Drive PDF Import',
+        isbnOrUan: `Source ID: ${synced.driveFileId}`,
+        badge: synced.customBadge || (synced.sourceFileName || synced.fileName).slice(0, 22),
+        badgeAr: synced.customBadge || (synced.sourceFileName || synced.fileName).slice(0, 22),
+        description: `Page-by-page extraction of ${synced.sourceFileName || synced.fileName} (${synced.totalPages} pages).`,
+        descriptionAr: `المحتوى المستخرج صفحة بصفحة لملف ${synced.sourceFileName || synced.fileName} (${synced.totalPages} صفحة).`,
+        sourceType: synced.sourceType,
+        processingStatus: synced.processingStatus,
+        sourceFileName: synced.sourceFileName || synced.fileName,
+        sha256: synced.sha256,
+        originalPageCount: synced.originalPageCount ?? synced.totalPages,
+        processedPageCount: synced.processedPageCount,
+        extractedTextPageCount: synced.extractedTextPageCount,
+        ocrPageCount: synced.ocrPageCount,
+        unprocessedPageCount: synced.unprocessedPageCount,
         chapters: synced.chapters
       });
     }
@@ -461,21 +502,25 @@ export function searchVerbatimLibrary(
         results.push({
           book,
           chapter,
+          originalPageNumber: chapter.startPage,
+          sourceType: book.sourceType,
           matchType: 'title',
           snippet: `${chapter.title} • Keywords: ${chapter.keywords.slice(0, 6).join(', ')}`,
           score: titleScore + matchedKeywordCount * 5
         });
       }
 
-      // 2. Section Heading & Body Matches (Exact or Multi-Token)
+      // 2. Section Heading, Native Body, and OCR Body Matches
       for (const section of chapter.sections) {
         const headingHay = `${section.heading} ${section.headingAr} ${section.evidenceGrade || ''}`.toLowerCase();
-        const bodyLower = section.body.toLowerCase();
+        const bodyLower = (section.body || '').toLowerCase();
+        const ocrLower = (section.ocrBody || '').toLowerCase();
         const notesLower = (section.clinicalNotes || []).join(' ').toLowerCase();
 
         let secScore = 0;
         let firstMatchIdx = -1;
         let firstMatchLen = cleanQ.length;
+        let matchedViaOcr = false;
 
         if (headingHay.includes(cleanQ)) {
           secScore += 95;
@@ -484,6 +529,13 @@ export function searchVerbatimLibrary(
         if (exactBodyIdx !== -1) {
           secScore += 80;
           firstMatchIdx = exactBodyIdx;
+        } else if (ocrLower) {
+          const exactOcrIdx = ocrLower.indexOf(cleanQ);
+          if (exactOcrIdx !== -1) {
+            secScore += 78;
+            firstMatchIdx = exactOcrIdx;
+            matchedViaOcr = true;
+          }
         }
 
         let matchedTokensInSec = 0;
@@ -501,6 +553,17 @@ export function searchVerbatimLibrary(
               firstMatchIdx = tokIdx;
               firstMatchLen = tok.length;
             }
+          } else if (ocrLower) {
+            const ocrTokIdx = ocrLower.indexOf(tok);
+            if (ocrTokIdx !== -1) {
+              secScore += 14;
+              tokenMatchedHere = true;
+              matchedViaOcr = true;
+              if (firstMatchIdx === -1) {
+                firstMatchIdx = ocrTokIdx;
+                firstMatchLen = tok.length;
+              }
+            }
           }
           if (notesLower.includes(tok)) {
             secScore += 12;
@@ -511,26 +574,34 @@ export function searchVerbatimLibrary(
           }
         }
 
-        // Boost when multiple distinct query tokens co-occur in the same section
         if (matchedTokensInSec >= 2) {
           secScore += matchedTokensInSec * 18;
         }
 
         if (secScore >= 20) {
+          const sourceText = matchedViaOcr && section.ocrBody ? section.ocrBody : section.body;
           let snippet = '';
-          if (firstMatchIdx !== -1) {
+          if (firstMatchIdx !== -1 && sourceText) {
             const start = Math.max(0, firstMatchIdx - 90);
-            const end = Math.min(section.body.length, firstMatchIdx + firstMatchLen + 160);
-            snippet = `...${section.body.slice(start, end).replace(/\n+/g, ' ')}...`;
+            const end = Math.min(sourceText.length, firstMatchIdx + firstMatchLen + 160);
+            snippet = `...${sourceText.slice(start, end).replace(/\n+/g, ' ')}...`;
           } else {
-            snippet = section.body.slice(0, 220).replace(/\n+/g, ' ') + '...';
+            snippet = (sourceText || '').slice(0, 220).replace(/\n+/g, ' ') + '...';
           }
 
           results.push({
             book,
             chapter,
             section,
-            matchType: headingHay.includes(cleanQ) || matchedTokensInSec >= 2 ? 'heading' : 'body',
+            originalPageNumber: section.originalPageNumber ?? chapter.startPage,
+            extractionMethod: section.extractionMethod || (matchedViaOcr ? 'ocr' : 'native_text'),
+            sourceType: book.sourceType,
+            matchType:
+              matchedViaOcr || section.extractionMethod === 'ocr'
+                ? 'ocr'
+                : headingHay.includes(cleanQ) || matchedTokensInSec >= 2
+                ? 'heading'
+                : 'body',
             snippet,
             score: secScore
           });
@@ -553,6 +624,8 @@ export function searchVerbatimLibrary(
           results.push({
             book,
             chapter,
+            originalPageNumber: chapter.startPage,
+            sourceType: book.sourceType,
             matchType: 'pearl',
             snippet: pearl.slice(0, 220) + (pearl.length > 220 ? '...' : ''),
             score: pearlScore + pearlTokens * 10
@@ -561,13 +634,15 @@ export function searchVerbatimLibrary(
         }
       }
 
-      // 4. Quick Tables & Section Tables Match
+      // 4. Quick Tables & Section Tables Match (including units, footnotes, and rawText)
       const allTables = [
         ...chapter.quickTables,
         ...chapter.sections.flatMap(s => s.tables || [])
       ];
       for (const table of allTables) {
-        const tableHay = `${table.title} ${table.titleAr || ''} ${table.headers.join(' ')} ${table.rows.map(r => r.join(' ')).join(' ')}`.toLowerCase();
+        const tableHay = `${table.title} ${table.titleAr || ''} ${table.headers.join(' ')} ${table.rows
+          .map(r => r.join(' '))
+          .join(' ')} ${table.unitsAndFootnotes || ''} ${table.rawText || ''}`.toLowerCase();
         let tableScore = tableHay.includes(cleanQ) ? 80 : 0;
         let tableTokens = 0;
         for (const tok of tokens) {
@@ -580,8 +655,11 @@ export function searchVerbatimLibrary(
           results.push({
             book,
             chapter,
+            table,
+            originalPageNumber: table.pageNumber ?? chapter.startPage,
+            sourceType: book.sourceType,
             matchType: 'table',
-            snippet: `Table: ${table.title} (${table.rows.length} reference rows)`,
+            snippet: `Table (p.${table.pageNumber ?? '?'}): ${table.title} (${table.rows.length} rows × ${table.headers.length} cols)`,
             score: tableScore + tableTokens * 10
           });
           break;

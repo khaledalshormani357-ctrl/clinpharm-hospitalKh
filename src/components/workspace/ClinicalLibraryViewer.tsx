@@ -18,7 +18,10 @@ import {
   downloadOfflinePdfFromVault,
   formatStorageBytes
 } from '../../lib/googleDrive/pdfOfflineStorageService';
-import { GoogleDriveBookSyncModal } from './GoogleDriveBookSyncModal';
+import {
+  GoogleDriveBookSyncModal,
+  getProcessingStatusBadgeMeta
+} from './GoogleDriveBookSyncModal';
 import { PdfPageCanvasViewer } from './PdfPageCanvasViewer';
 import {
   BookOpen,
@@ -43,7 +46,8 @@ import {
   CloudDownload,
   FileText,
   Printer,
-  Share2
+  Share2,
+  Columns2
 } from 'lucide-react';
 import { printOrSaveClinicalPdf, shareClinicalFile } from '../../lib/androidPermissions';
 
@@ -62,18 +66,14 @@ export function ClinicalLibraryViewer({
 }: Props) {
   const [libraryVersion, setLibraryVersion] = useState(0);
   const [driveSyncModalOpen, setDriveSyncModalOpen] = useState(false);
-  const [readerViewMode, setReaderViewMode] = useState<'verbatim_text' | 'pdf_canvas'>('verbatim_text');
+  const [readerViewMode, setReaderViewMode] = useState<
+    'verbatim_text' | 'pdf_canvas' | 'side_by_side'
+  >('verbatim_text');
   const [activePdfPage, setActivePdfPage] = useState<number>(1);
   const [pageJumpInput, setPageJumpInput] = useState<string>('');
 
   useEffect(() => {
-    void hydrateSyncedFullBooks().then(async records => {
-      if (records.length < 7) {
-        const { ensureAllCoreBooksPreloadedOffline } = await import(
-          '../../lib/googleDrive/embeddedBookCompiler'
-        );
-        await ensureAllCoreBooksPreloadedOffline(false);
-      }
+    void hydrateSyncedFullBooks().then(() => {
       setLibraryVersion(v => v + 1);
     });
     const handleFullBooksUpdated = () => {
@@ -452,14 +452,24 @@ export function ClinicalLibraryViewer({
                     type="button"
                     onClick={() => {
                       setActiveChapterId(match.chapter.id);
+                      if (match.originalPageNumber) {
+                        setActivePdfPage(match.originalPageNumber);
+                      }
                       if (match.section) {
                         scrollToSection(match.section.id);
                       }
                     }}
                     className="w-full text-left p-2 rounded-lg bg-white dark:bg-slate-800 border border-amber-200 dark:border-amber-900 text-[11px] hover:border-amber-400 transition"
                   >
-                    <div className="font-bold text-slate-800 dark:text-slate-200 truncate">
-                      {match.chapter.title}
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="font-bold text-slate-800 dark:text-slate-200 truncate">
+                        {match.chapter.title}
+                      </span>
+                      {match.originalPageNumber && (
+                        <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-teal-500/15 text-teal-700 dark:text-teal-300 shrink-0">
+                          p.{match.originalPageNumber}
+                        </span>
+                      )}
                     </div>
                     {match.section && (
                       <div className="text-teal-600 dark:text-teal-400 font-semibold text-[10px]">
@@ -587,7 +597,7 @@ export function ClinicalLibraryViewer({
                           : 'text-slate-600 dark:text-slate-300'
                       }`}
                     >
-                      {lang === 'ar' ? 'النص المهيكل (100%)' : 'Verbatim Text'}
+                      {lang === 'ar' ? 'النص المستخرج' : 'Extracted Text'}
                     </button>
                     <button
                       type="button"
@@ -600,6 +610,18 @@ export function ClinicalLibraryViewer({
                     >
                       <FileText className="w-3 h-3" />
                       <span>{lang === 'ar' ? 'صفحة الـ PDF الأصلية' : 'Original PDF Page'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setReaderViewMode('side_by_side')}
+                      className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer flex items-center gap-1 ${
+                        readerViewMode === 'side_by_side'
+                          ? 'bg-teal-600 text-white shadow-xs'
+                          : 'text-slate-600 dark:text-slate-300'
+                      }`}
+                    >
+                      <Columns2 className="w-3 h-3" />
+                      <span>{lang === 'ar' ? 'مقارنة جنباً إلى جنب' : 'Side-by-Side'}</span>
                     </button>
                   </div>
 
@@ -729,15 +751,15 @@ export function ClinicalLibraryViewer({
 
           {/* Reader Body Container */}
           <div className={`${isFullWidth ? 'max-w-none' : 'max-w-4xl mx-auto'} space-y-8`}>
-            {/* Full-Book Sync Callout Strip if current book is not yet synced from Google Drive */}
+            {/* Full-Book Verification Status Callout Strip */}
             {!syncedFullBookRecord ? (
-              <div className="p-3.5 rounded-xl bg-teal-50/70 dark:bg-teal-950/30 border border-teal-200 dark:border-teal-800/70 flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="p-3.5 rounded-xl bg-slate-100/80 dark:bg-slate-800/60 border border-slate-300 dark:border-slate-700 flex flex-wrap items-center justify-between gap-3 text-xs">
                 <div className="flex items-center gap-2.5 text-slate-700 dark:text-slate-200">
                   <CloudDownload className="w-4 h-4 text-teal-600 shrink-0" />
                   <span>
                     {lang === 'ar'
-                      ? 'لاستيراد وقراءة جميع صفحات وفصول ملف الـ PDF الأصلي الكامل لهذا المرجع (100% من الصفحات حرفياً) من حساب Google Drive الخاص بك:'
-                      : 'To import and read 100% of the literal PDF pages and chapters of this textbook from your Google Drive account:'}
+                      ? 'الحالة [لم يُستورد ملف PDF الأصلي]: يتم حالياً عرض الفصول المرجعية المدمجة فقط. لاستيراد ملف PDF الأصلي الكامل والتحقق من صفحاته:'
+                      : 'Status [Not Imported]: Currently viewing built-in reference chapters. To import and verify the original full PDF textbook:'}
                   </span>
                 </div>
                 <button
@@ -745,51 +767,136 @@ export function ClinicalLibraryViewer({
                   onClick={() => setDriveSyncModalOpen(true)}
                   className="px-3 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-500 text-white font-bold whitespace-nowrap cursor-pointer"
                 >
-                  {lang === 'ar' ? 'ربط Google Drive ومزامنة الكتاب الكامل' : 'Sync Full PDF from Google Drive'}
+                  {lang === 'ar' ? 'استيراد ملف PDF الأصلي' : 'Import Original PDF'}
                 </button>
               </div>
             ) : (
-              <div className="p-3 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/70 flex flex-wrap items-center justify-between gap-3 text-xs">
-                <div className="flex items-center gap-2 font-semibold text-emerald-900 dark:text-emerald-200 font-mono">
-                  <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span>
-                    {lang === 'ar'
-                      ? `محفوظ محلياً في IndexedDB (يعمل 100% بدون إنترنت): ${syncedFullBookRecord.fileName} (${syncedFullBookRecord.totalPages} صفحة • ${formatStorageBytes(syncedFullBookRecord.fileSize)})`
-                      : `Cached Offline in IndexedDB (100% Offline Ready): ${syncedFullBookRecord.fileName} (${syncedFullBookRecord.totalPages} Pages • ${formatStorageBytes(syncedFullBookRecord.fileSize)})`}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2.5">
-                  <button
-                    type="button"
-                    onClick={() => void downloadOfflinePdfFromVault(activeBook.id)}
-                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-teal-600 hover:bg-teal-500 text-white font-bold cursor-pointer"
+              (() => {
+                const statusMeta = getProcessingStatusBadgeMeta(
+                  syncedFullBookRecord.processingStatus,
+                  lang
+                );
+                const isEmbedded = syncedFullBookRecord.sourceType === 'embedded_synthetic';
+                return (
+                  <div
+                    className={`p-3 rounded-xl border flex flex-wrap items-center justify-between gap-3 text-xs ${
+                      syncedFullBookRecord.processingStatus === 'verified_complete'
+                        ? 'bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/70'
+                        : 'bg-amber-50/70 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800/70'
+                    }`}
                   >
-                    <FileDown className="w-3.5 h-3.5" />
-                    <span>
-                      {lang === 'ar' ? 'تنزيل PDF بدون إنترنت' : 'Download Offline PDF'}
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setDriveSyncModalOpen(true)}
-                    className="text-teal-700 dark:text-teal-300 font-bold hover:underline cursor-pointer"
-                  >
-                    {lang === 'ar' ? 'إدارة خزنة IndexedDB' : 'Manage Offline Vault'}
-                  </button>
-                </div>
-              </div>
+                    <div className="flex items-center gap-2 font-semibold text-slate-900 dark:text-slate-100 font-mono flex-wrap">
+                      <span
+                        className={`px-2 py-0.5 rounded border text-[10px] font-sans font-bold ${statusMeta.badgeClass}`}
+                      >
+                        {statusMeta.label}
+                      </span>
+                      <span>
+                        {syncedFullBookRecord.sourceFileName || syncedFullBookRecord.fileName} (
+                        {syncedFullBookRecord.originalPageCount ?? syncedFullBookRecord.totalPages}{' '}
+                        {lang === 'ar' ? 'صفحة' : 'Pages'} •{' '}
+                        {lang === 'ar' ? 'نص أصلي:' : 'Text:'}{' '}
+                        {syncedFullBookRecord.extractedTextPageCount ?? 0} •{' '}
+                        {lang === 'ar' ? 'OCR:' : 'OCR:'} {syncedFullBookRecord.ocrPageCount ?? 0} •{' '}
+                        {lang === 'ar' ? 'تحتاج OCR:' : 'Needs OCR:'}{' '}
+                        {syncedFullBookRecord.unprocessedPageCount ?? 0} •{' '}
+                        {formatStorageBytes(syncedFullBookRecord.fileSize)})
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2.5">
+                      {!isEmbedded && (
+                        <button
+                          type="button"
+                          onClick={() => void downloadOfflinePdfFromVault(activeBook.id)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-teal-600 hover:bg-teal-500 text-white font-bold cursor-pointer"
+                        >
+                          <FileDown className="w-3.5 h-3.5" />
+                          <span>
+                            {lang === 'ar' ? 'تنزيل PDF الأصلي' : 'Download Original PDF'}
+                          </span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setDriveSyncModalOpen(true)}
+                        className="text-teal-700 dark:text-teal-300 font-bold hover:underline cursor-pointer"
+                      >
+                        {lang === 'ar' ? 'إدارة وفحص الاستيراد' : 'Manage & Verify Import'}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()
             )}
 
-            {/* If user switched to Original PDF Page Canvas view */}
-            {syncedFullBookRecord && readerViewMode === 'pdf_canvas' && (
-              <PdfPageCanvasViewer
-                bookId={activeBook.id}
-                totalPages={syncedFullBookRecord.totalPages}
-                initialPage={activePdfPage}
-                lang={lang}
-                onPageChange={p => setActivePdfPage(p)}
-              />
-            )}
+            {/* If user switched to Original PDF Page Canvas view or Side-by-Side comparison */}
+            {syncedFullBookRecord &&
+              (readerViewMode === 'pdf_canvas' || readerViewMode === 'side_by_side') && (
+                <div
+                  className={
+                    readerViewMode === 'side_by_side'
+                      ? 'grid grid-cols-1 lg:grid-cols-2 gap-4 items-start'
+                      : ''
+                  }
+                >
+                  <PdfPageCanvasViewer
+                    bookId={activeBook.id}
+                    totalPages={syncedFullBookRecord.totalPages}
+                    initialPage={activePdfPage}
+                    lang={lang}
+                    onPageChange={p => setActivePdfPage(p)}
+                  />
+                  {readerViewMode === 'side_by_side' && (
+                    <div className="p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900 space-y-3">
+                      <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-2 text-xs font-bold">
+                        <span>
+                          {lang === 'ar'
+                            ? `النص المستخرج المقابل للصفحة رقم ${activePdfPage}`
+                            : `Extracted Text for Page ${activePdfPage}`}
+                        </span>
+                        {(() => {
+                          const pRec = syncedFullBookRecord.pages.find(
+                            p => p.pageNumber === activePdfPage
+                          );
+                          return (
+                            <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-teal-500/15 text-teal-700 dark:text-teal-300">
+                              {pRec?.extractionMethod || 'native_text'} (
+                              {pRec?.extractionStatus || 'extracted'})
+                            </span>
+                          );
+                        })()}
+                      </div>
+                      {(() => {
+                        const pRec = syncedFullBookRecord.pages.find(
+                          p => p.pageNumber === activePdfPage
+                        );
+                        if (!pRec || (!pRec.extractedText && !pRec.ocrText && !pRec.text)) {
+                          return (
+                            <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200 text-xs">
+                              {lang === 'ar'
+                                ? `الصفحة رقم ${activePdfPage} لا تحتوي على طبقة نصية مستخرجة (${
+                                    pRec?.extractionStatus === 'blank'
+                                      ? 'صفحة فارغة'
+                                      : 'صفحة مصورة تحتاج إلى OCR'
+                                  }). يمكنك قراءة الصفحة بصرياً في العارض المجاور.`
+                                : `Page ${activePdfPage} has no extracted text layer (${
+                                    pRec?.extractionStatus === 'blank'
+                                      ? 'blank page'
+                                      : 'scanned page requiring OCR'
+                                  }). View the visual page in the adjacent PDF pane.`}
+                            </div>
+                          );
+                        }
+                        return (
+                          <div className="text-xs sm:text-sm leading-relaxed font-serif whitespace-pre-line max-h-[600px] overflow-y-auto">
+                            {pRec.extractedText || pRec.ocrText || pRec.text}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+                </div>
+              )}
             {/* Chapter Header Block */}
             <div className="space-y-3 pb-6 border-b border-slate-100 dark:border-slate-800">
               <div className="flex flex-wrap items-center gap-2">
@@ -961,11 +1068,35 @@ export function ClinicalLibraryViewer({
                       </h3>
                     </div>
 
-                    {sec.evidenceGrade && (
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-100 dark:bg-teal-950 text-teal-800 dark:text-teal-300 border border-teal-200/60">
-                        {sec.evidenceGrade}
-                      </span>
-                    )}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {sec.originalPageNumber && syncedFullBookRecord && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActivePdfPage(sec.originalPageNumber!);
+                            setReaderViewMode('side_by_side');
+                          }}
+                          className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md bg-slate-200/80 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-teal-500/20 cursor-pointer"
+                        >
+                          {lang === 'ar'
+                            ? `عرض صفحة PDF #${sec.originalPageNumber}`
+                            : `View PDF p.${sec.originalPageNumber}`}
+                        </button>
+                      )}
+                      {sec. evidenceGrade && (
+                        <span
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                            sec.extractionStatus === 'needs_ocr'
+                              ? 'bg-orange-100 dark:bg-orange-950 text-orange-800 dark:text-orange-300 border-orange-300'
+                              : sec.extractionMethod === 'ocr'
+                              ? 'bg-sky-100 dark:bg-sky-950 text-sky-800 dark:text-sky-300 border-sky-300'
+                              : 'bg-teal-100 dark:bg-teal-950 text-teal-800 dark:text-teal-300 border-teal-200/60'
+                          }`}
+                        >
+                          {sec.evidenceGrade}
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   {/* Dual-Language Tag */}
@@ -973,18 +1104,40 @@ export function ClinicalLibraryViewer({
                     {sec.headingAr}
                   </div>
 
-                  {/* Verbatim Clinical Body Text */}
-                  <div
-                    className={`leading-relaxed text-slate-800 dark:text-slate-200 font-serif whitespace-pre-line ${
-                      fontSize === 'sm'
-                        ? 'text-xs sm:text-sm'
-                        : fontSize === 'lg'
-                        ? 'text-base sm:text-lg'
-                        : 'text-sm sm:text-base'
-                    }`}
-                  >
-                    {sec.body}
-                  </div>
+                  {/* Verbatim Clinical Body Text or Unprocessed Scanned Page Notice */}
+                  {sec.extractionStatus === 'needs_ocr' && !sec.body && !sec.ocrBody ? (
+                    <div className="p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200 text-xs flex items-center justify-between gap-2">
+                      <span>
+                        {lang === 'ar'
+                          ? `هذه الصفحة (رقم ${sec.originalPageNumber ?? '?'}) عبارة عن صفحة مصورة/تخطيطية بدون طبقة نصية وتحتاج إلى معالجة OCR.`
+                          : `Page ${sec.originalPageNumber ?? '?'} is a scanned/graphical page without an extractable text layer and requires OCR.`}
+                      </span>
+                      {sec.originalPageNumber && syncedFullBookRecord && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActivePdfPage(sec.originalPageNumber!);
+                            setReaderViewMode('pdf_canvas');
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-amber-600 text-white font-bold shrink-0 cursor-pointer"
+                        >
+                          {lang === 'ar' ? 'فتح صفحة PDF الأصلية' : 'Open PDF Page'}
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <div
+                      className={`leading-relaxed text-slate-800 dark:text-slate-200 font-serif whitespace-pre-line ${
+                        fontSize === 'sm'
+                          ? 'text-xs sm:text-sm'
+                          : fontSize === 'lg'
+                          ? 'text-base sm:text-lg'
+                          : 'text-sm sm:text-base'
+                      }`}
+                    >
+                      {sec.body || sec.ocrBody}
+                    </div>
+                  )}
                 </article>
               ))}
             </div>

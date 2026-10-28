@@ -1,6 +1,7 @@
 import {
+  BookProcessingStatus,
+  BookSourceType,
   SyncedFullBookRecord,
-  SyncedPdfBlobRecord,
   getSyncedFullBooksSync,
   getSyncedPdfBytes,
   hydrateSyncedFullBooks,
@@ -14,8 +15,18 @@ export interface OfflineBookVaultItem {
   bookId: string;
   driveFileId: string;
   fileName: string;
+  sourceFileName: string;
+  displayTitle: string;
   customTitle?: string;
+  sourceType: BookSourceType;
+  processingStatus: BookProcessingStatus;
+  sha256: string;
   totalPages: number;
+  originalPageCount: number;
+  processedPageCount: number;
+  extractedTextPageCount: number;
+  ocrPageCount: number;
+  unprocessedPageCount: number;
   totalChapters: number;
   totalCharacters: number;
   syncedAt: string;
@@ -31,6 +42,8 @@ export interface OfflineVaultDiagnostics {
   isPersistentStorageGranted: boolean;
   isOnline: boolean;
   totalBooksCached: number;
+  totalVerifiedOriginalPdfs: number;
+  totalEmbeddedSummaries: number;
   totalBinaryPdfsCached: number;
   totalPagesCached: number;
   totalChaptersCached: number;
@@ -44,11 +57,19 @@ export interface OfflineVaultDiagnostics {
 export interface IntegrityCheckResult {
   bookId: string;
   fileName: string;
+  sourceType: BookSourceType;
+  processingStatus: BookProcessingStatus;
+  sha256: string;
   isHealthy: boolean;
+  isVerifiedOriginalPdf: boolean;
   hasVerbatimPages: boolean;
   hasBinaryPdf: boolean;
   isValidPdfHeader: boolean;
   pageCount: number;
+  processedPageCount: number;
+  extractedTextPageCount: number;
+  ocrPageCount: number;
+  unprocessedPageCount: number;
   binaryBytes: number;
   messageEn: string;
   messageAr: string;
@@ -60,7 +81,6 @@ export interface IntegrityCheckResult {
 export function verifyPdfMagicHeader(buffer: ArrayBuffer | null | undefined): boolean {
   if (!buffer || buffer.byteLength < 5) return false;
   const view = new Uint8Array(buffer, 0, Math.min(16, buffer.byteLength));
-  // Search for "%PDF-" (0x25 0x50 0x44 0x46 0x2D)
   for (let i = 0; i <= view.length - 5; i++) {
     if (
       view[i] === 0x25 &&
@@ -90,10 +110,6 @@ export function formatStorageBytes(bytes: number): string {
   return `${mb.toFixed(1)} MB`;
 }
 
-/**
- * Requests persistent browser storage so the operating system / browser never evicts
- * cached Google Drive medical PDFs from IndexedDB under storage pressure.
- */
 export async function requestPersistentOfflineStorage(): Promise<boolean> {
   if (typeof navigator === 'undefined' || !navigator.storage) {
     return false;
@@ -112,9 +128,6 @@ export async function requestPersistentOfflineStorage(): Promise<boolean> {
   }
 }
 
-/**
- * Checks whether persistent storage is currently granted by the browser.
- */
 export async function checkPersistentStorageStatus(): Promise<boolean> {
   if (
     typeof navigator === 'undefined' ||
@@ -131,8 +144,8 @@ export async function checkPersistentStorageStatus(): Promise<boolean> {
 }
 
 /**
- * Returns full diagnostics of the IndexedDB Offline PDF Vault, including per-book
- * binary availability, page counts, and browser storage quota estimates.
+ * Returns full diagnostics of the IndexedDB Offline PDF Vault, explicitly separating
+ * verified original PDFs from embedded synthetic summaries and partially processed books.
  */
 export async function getOfflineVaultDiagnostics(): Promise<OfflineVaultDiagnostics> {
   const isIndexedDbSupported = typeof indexedDB !== 'undefined';
@@ -154,16 +167,32 @@ export async function getOfflineVaultDiagnostics(): Promise<OfflineVaultDiagnost
   let totalChaptersCached = 0;
   let totalVaultBytes = 0;
   let totalBinaryPdfsCached = 0;
+  let totalVerifiedOriginalPdfs = 0;
+  let totalEmbeddedSummaries = 0;
 
   const books: OfflineBookVaultItem[] = records.map(rec => {
     const blobInfo = blobMap.get(rec.bookId);
     const hasBinaryPdf = Boolean(blobInfo && blobInfo.byteLength > 0);
     const binaryByteSize = blobInfo?.byteLength || 0;
     const indexedTextByteSize = Math.max(rec.totalCharacters * 2, 1024);
+    const sourceType: BookSourceType = rec.sourceType || 'unverified_legacy';
+    const processingStatus: BookProcessingStatus =
+      rec.processingStatus ||
+      (sourceType === 'embedded_synthetic' ? 'embedded_summary' : 'partially_complete');
 
     if (hasBinaryPdf) {
       totalBinaryPdfsCached++;
     }
+    if (
+      processingStatus === 'verified_complete' &&
+      (sourceType === 'google_drive_pdf' || sourceType === 'local_file_pdf')
+    ) {
+      totalVerifiedOriginalPdfs++;
+    }
+    if (sourceType === 'embedded_synthetic') {
+      totalEmbeddedSummaries++;
+    }
+
     totalPagesCached += rec.totalPages;
     totalChaptersCached += rec.totalChapters;
     totalVaultBytes += binaryByteSize + indexedTextByteSize;
@@ -172,8 +201,18 @@ export async function getOfflineVaultDiagnostics(): Promise<OfflineVaultDiagnost
       bookId: rec.bookId,
       driveFileId: rec.driveFileId,
       fileName: rec.fileName,
+      sourceFileName: rec.sourceFileName || rec.fileName,
+      displayTitle: rec.displayTitle || rec.customTitle || rec.fileName,
       customTitle: rec.customTitle,
+      sourceType,
+      processingStatus,
+      sha256: rec.sha256 || '',
       totalPages: rec.totalPages,
+      originalPageCount: rec.originalPageCount ?? rec.totalPages,
+      processedPageCount: rec.processedPageCount ?? rec.totalPages,
+      extractedTextPageCount: rec.extractedTextPageCount ?? 0,
+      ocrPageCount: rec.ocrPageCount ?? 0,
+      unprocessedPageCount: rec.unprocessedPageCount ?? 0,
       totalChapters: rec.totalChapters,
       totalCharacters: rec.totalCharacters,
       syncedAt: rec.syncedAt,
@@ -181,7 +220,10 @@ export async function getOfflineVaultDiagnostics(): Promise<OfflineVaultDiagnost
       binaryByteSize,
       indexedTextByteSize,
       isValidPdfSignature: blobInfo?.isValidPdfSignature ?? false,
-      offlineReady: rec.totalPages > 0
+      offlineReady:
+        processingStatus === 'verified_complete' &&
+        hasBinaryPdf &&
+        Boolean(blobInfo?.isValidPdfSignature)
     };
   });
 
@@ -211,6 +253,8 @@ export async function getOfflineVaultDiagnostics(): Promise<OfflineVaultDiagnost
     isPersistentStorageGranted,
     isOnline,
     totalBooksCached: books.length,
+    totalVerifiedOriginalPdfs,
+    totalEmbeddedSummaries,
     totalBinaryPdfsCached,
     totalPagesCached,
     totalChaptersCached,
@@ -224,11 +268,23 @@ export async function getOfflineVaultDiagnostics(): Promise<OfflineVaultDiagnost
 
 /**
  * Retrieves the cached PDF file from IndexedDB as a standard browser Blob.
- * If not yet cached in IndexedDB, automatically compiles the built-in reference book PDF on the fly.
+ * Does NOT silently synthesize or save an embedded summary unless `allowEmbeddedSummaryFallback: true` is explicitly passed.
  */
-export async function getOfflinePdfBlob(bookId: string): Promise<Blob | null> {
+export async function getOfflinePdfBlob(
+  bookId: string,
+  options?: { allowEmbeddedSummaryFallback?: boolean }
+): Promise<Blob | null> {
   let bytes = await getSyncedPdfBytes(bookId);
   if (!bytes || bytes.byteLength === 0) {
+    const { KNOWN_DRIVE_BOOK_MAPPINGS } = await import('./fullBookEngine');
+    const matched = KNOWN_DRIVE_BOOK_MAPPINGS.find(
+      m => m.bookId === bookId || m.defaultDriveId === bookId
+    );
+    if (matched && matched.bookId !== bookId) {
+      bytes = await getSyncedPdfBytes(matched.bookId);
+    }
+  }
+  if ((!bytes || bytes.byteLength === 0) && options?.allowEmbeddedSummaryFallback) {
     try {
       const { compileEmbeddedBookToFullRecord } = await import('./embeddedBookCompiler');
       const compiled = compileEmbeddedBookToFullRecord(bookId);
@@ -242,26 +298,19 @@ export async function getOfflinePdfBlob(bookId: string): Promise<Blob | null> {
   return new Blob([bytes], { type: 'application/pdf' });
 }
 
-/**
- * Creates a temporary local `blob:` Object URL for a cached PDF in IndexedDB.
- * Caller should call `URL.revokeObjectURL(url)` when done if used long-term.
- */
 export async function createOfflinePdfObjectUrl(bookId: string): Promise<string | null> {
   const blob = await getOfflinePdfBlob(bookId);
   if (!blob) return null;
   return URL.createObjectURL(blob);
 }
 
-/**
- * Triggers a direct 100% offline download of the cached PDF from IndexedDB to the user's device.
- */
 export async function downloadOfflinePdfFromVault(bookId: string): Promise<boolean> {
   const blob = await getOfflinePdfBlob(bookId);
   if (!blob) return false;
 
   const books = getSyncedFullBooksSync();
   const book = books.find(b => b.bookId === bookId);
-  const rawName = book?.fileName || `${bookId}.pdf`;
+  const rawName = book?.sourceFileName || book?.fileName || `${bookId}.pdf`;
   const safeFileName = rawName.toLowerCase().endsWith('.pdf') ? rawName : `${rawName}.pdf`;
 
   const url = URL.createObjectURL(blob);
@@ -276,7 +325,12 @@ export async function downloadOfflinePdfFromVault(bookId: string): Promise<boole
 }
 
 /**
- * Verifies the integrity of a cached book in IndexedDB (both verbatim pages and binary PDF header).
+ * Verifies the integrity of a book in IndexedDB, strictly distinguishing between:
+ * - `verified_complete` (original PDF with 100% processed pages and 0 unprocessed pages)
+ * - `partially_complete` (original PDF with unprocessed / needs-OCR pages)
+ * - `needs_ocr` (scanned PDF with 0 text pages)
+ * - `embedded_summary` (synthetic built-in summary, NOT the original PDF)
+ * - `not_imported` (missing)
  */
 export async function verifyOfflineBookIntegrity(bookId: string): Promise<IntegrityCheckResult> {
   const records = await hydrateSyncedFullBooks();
@@ -286,50 +340,119 @@ export async function verifyOfflineBookIntegrity(bookId: string): Promise<Integr
     return {
       bookId,
       fileName: bookId,
+      sourceType: 'unverified_legacy',
+      processingStatus: 'not_imported',
+      sha256: '',
       isHealthy: false,
+      isVerifiedOriginalPdf: false,
       hasVerbatimPages: false,
       hasBinaryPdf: false,
       isValidPdfHeader: false,
       pageCount: 0,
+      processedPageCount: 0,
+      extractedTextPageCount: 0,
+      ocrPageCount: 0,
+      unprocessedPageCount: 0,
       binaryBytes: 0,
-      messageEn: 'Book is not cached in local IndexedDB storage.',
-      messageAr: 'المرجع غير مخزن حالياً في قاعدة البيانات المحلية IndexedDB.'
+      messageEn: 'Status [Not Imported]: Book has not been imported into IndexedDB yet.',
+      messageAr: 'الحالة [لم يُستورد]: لم يتم استيراد ملف PDF الأصلي لهذا المرجع بعد.'
     };
   }
 
   const pdfBytes = await getSyncedPdfBytes(bookId);
-  const hasVerbatimPages = record.pages.length > 0 && record.totalPages > 0;
+  const sourceType: BookSourceType = record.sourceType || 'unverified_legacy';
+  const processingStatus: BookProcessingStatus =
+    record.processingStatus ||
+    (sourceType === 'embedded_synthetic' ? 'embedded_summary' : 'partially_complete');
+
+  const originalPageCount = record.originalPageCount ?? record.totalPages;
+  const processedPageCount = record.processedPageCount ?? record.pages.length;
+  const extractedTextPageCount = record.extractedTextPageCount ?? 0;
+  const ocrPageCount = record.ocrPageCount ?? 0;
+  const unprocessedPageCount = record.unprocessedPageCount ?? 0;
+
+  const hasVerbatimPages = record.pages.length > 0 && originalPageCount > 0;
   const hasBinaryPdf = Boolean(pdfBytes && pdfBytes.byteLength > 0);
   const isValidPdfHeader = verifyPdfMagicHeader(pdfBytes);
   const binaryBytes = pdfBytes?.byteLength || 0;
-  const isHealthy = hasVerbatimPages && (!hasBinaryPdf || isValidPdfHeader);
+
+  if (sourceType === 'embedded_synthetic' || processingStatus === 'embedded_summary') {
+    return {
+      bookId: record.bookId,
+      fileName: record.sourceFileName || record.fileName,
+      sourceType: 'embedded_synthetic',
+      processingStatus: 'embedded_summary',
+      sha256: record.sha256 || '',
+      isHealthy: false,
+      isVerifiedOriginalPdf: false,
+      hasVerbatimPages,
+      hasBinaryPdf,
+      isValidPdfHeader,
+      pageCount: originalPageCount,
+      processedPageCount,
+      extractedTextPageCount,
+      ocrPageCount,
+      unprocessedPageCount,
+      binaryBytes,
+      messageEn: `Status [Non-Original Embedded Summary]: "${record.fileName}" (${originalPageCount} summary pages) is a built-in summary, NOT the original publisher PDF. Import the original PDF from Google Drive or device.`,
+      messageAr: `الحالة [ملخص مضمّن غير أصلي]: "${record.fileName}" (${originalPageCount} صفحة ملخصة) هو ملخص مدمج وليس ملف PDF الأصلي للكتاب. يرجى استيراد ملف PDF الأصلي من Google Drive أو من جهازك.`
+    };
+  }
+
+  const isVerifiedOriginalPdf =
+    (sourceType === 'google_drive_pdf' || sourceType === 'local_file_pdf') &&
+    processingStatus === 'verified_complete' &&
+    unprocessedPageCount === 0 &&
+    processedPageCount === originalPageCount &&
+    originalPageCount > 0 &&
+    hasBinaryPdf &&
+    isValidPdfHeader;
+
+  if (isVerifiedOriginalPdf) {
+    return {
+      bookId: record.bookId,
+      fileName: record.sourceFileName || record.fileName,
+      sourceType,
+      processingStatus: 'verified_complete',
+      sha256: record.sha256 || '',
+      isHealthy: true,
+      isVerifiedOriginalPdf: true,
+      hasVerbatimPages,
+      hasBinaryPdf,
+      isValidPdfHeader,
+      pageCount: originalPageCount,
+      processedPageCount,
+      extractedTextPageCount,
+      ocrPageCount,
+      unprocessedPageCount: 0,
+      binaryBytes,
+      messageEn: `Status [Verified Complete]: Original PDF "${record.sourceFileName || record.fileName}" (${originalPageCount} pages, ${extractedTextPageCount} native text, ${ocrPageCount} OCR, ${formatStorageBytes(binaryBytes)}, SHA-256: ${(record.sha256 || '').slice(0, 12)}...) verified.`,
+      messageAr: `الحالة [مكتمل التحقق]: ملف PDF الأصلي "${record.sourceFileName || record.fileName}" (${originalPageCount} صفحة، ${extractedTextPageCount} صفحة نصية، ${ocrPageCount} صفحة OCR، الحجم ${formatStorageBytes(binaryBytes)}، البصمة SHA-256: ${(record.sha256 || '').slice(0, 12)}...) مكتمل وموثّق.`
+    };
+  }
 
   return {
     bookId: record.bookId,
-    fileName: record.fileName,
-    isHealthy,
+    fileName: record.sourceFileName || record.fileName,
+    sourceType,
+    processingStatus,
+    sha256: record.sha256 || '',
+    isHealthy: false,
+    isVerifiedOriginalPdf: false,
     hasVerbatimPages,
     hasBinaryPdf,
     isValidPdfHeader,
-    pageCount: record.totalPages,
+    pageCount: originalPageCount,
+    processedPageCount,
+    extractedTextPageCount,
+    ocrPageCount,
+    unprocessedPageCount,
     binaryBytes,
-    messageEn: isHealthy
-      ? `Verified 100% offline readiness: ${record.totalPages} indexed pages${
-          hasBinaryPdf ? ` + ${formatStorageBytes(binaryBytes)} valid PDF binary` : ''
-        }.`
-      : 'Warning: Local cache record is incomplete or missing pages.',
-    messageAr: isHealthy
-      ? `تم التحقق من الجاهزية الكاملة بدون إنترنت: ${record.totalPages} صفحة مفهرسة${
-          hasBinaryPdf ? ` + ملف PDF أصلي سليم (${formatStorageBytes(binaryBytes)})` : ''
-        }.`
-      : 'تنبيه: النسخة المحلية غير مكتملة، يُرجى إعادة المزامنة.'
+    messageEn: `Status [${processingStatus}]: "${record.sourceFileName || record.fileName}" has ${extractedTextPageCount} extracted text pages, ${ocrPageCount} OCR pages, and ${unprocessedPageCount} unprocessed/scanned pages out of ${originalPageCount} total pages.`,
+    messageAr: `الحالة [${processingStatus === 'needs_ocr' ? 'يحتاج إلى OCR' : 'مكتمل جزئياً'}]: الملف "${record.sourceFileName || record.fileName}" يحتوي على ${extractedTextPageCount} صفحة نصية، و${ocrPageCount} صفحة OCR، و${unprocessedPageCount} صفحة غير معالجة/تحتاج إلى OCR من أصل ${originalPageCount} صفحة.`
   };
 }
 
-/**
- * Stores a synced Google Drive book record and its raw PDF binary in IndexedDB
- * and automatically requests persistent storage protection.
- */
 export async function cacheDrivePdfBookOffline(
   record: SyncedFullBookRecord,
   pdfBytes?: ArrayBuffer
@@ -338,23 +461,14 @@ export async function cacheDrivePdfBookOffline(
   await saveSyncedFullBook(record, pdfBytes);
 }
 
-/**
- * Removes a single book and its binary PDF from IndexedDB.
- */
 export async function removeBookFromOfflineVault(bookId: string): Promise<void> {
   await removeSyncedFullBook(bookId);
 }
 
-/**
- * Clears the entire IndexedDB offline PDF vault.
- */
 export async function clearEntireOfflineVault(): Promise<void> {
   await clearAllSyncedFullBooksFromIdb();
 }
 
-/**
- * Subscribes to browser online/offline network transitions for real-time UI indicators.
- */
 export function subscribeOfflineNetworkStatus(
   onStatusChange: (isOnline: boolean) => void
 ): () => void {
@@ -372,5 +486,3 @@ export function subscribeOfflineNetworkStatus(
     window.removeEventListener('offline', handleOffline);
   };
 }
-
-export type { SyncedFullBookRecord, SyncedPdfBlobRecord };

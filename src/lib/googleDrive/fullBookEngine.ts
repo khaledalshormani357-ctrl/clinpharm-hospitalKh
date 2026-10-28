@@ -1,12 +1,27 @@
 import {
+  BookProcessingStatus,
+  BookSourceType,
   MedicalSystemCategory,
+  PageExtractionMethod,
+  PageExtractionStatus,
   VerbatimChapter,
   VerbatimReferenceTable,
   VerbatimSection
 } from '../library/libraryTypes';
 import {
+  BookBatchCheckpointRecord,
+  BookImportDiagnosticReport,
+  BookImportJobRecord,
   FullBookPageRecord,
+  StructuredBookChapterRecord,
+  StructuredBookSectionRecord,
+  StructuredBookTableRecord,
   SyncedFullBookRecord,
+  clearBookBatchCheckpoint,
+  findVerifiedBookBySha256Sync,
+  getBookBatchCheckpoint,
+  saveBookBatchCheckpoint,
+  saveBookImportJob,
   saveSyncedFullBook
 } from './fullBookIdb';
 
@@ -22,13 +37,29 @@ export interface DriveFileItem {
 export interface BookSyncProgress {
   bookId: string;
   fileName: string;
-  phase: 'connecting' | 'downloading' | 'indexing' | 'saving' | 'completed' | 'error';
+  phase: 'connecting' | 'downloading' | 'indexing' | 'ocr' | 'saving' | 'completed' | 'error';
+  stageNumber?: number;
+  stageLabel?: string;
   currentPage: number;
   totalPages: number;
   downloadedBytes?: number;
   totalBytes?: number;
+  processingStatus?: BookProcessingStatus;
   message: string;
 }
+
+export interface OcrPageResult {
+  ocrText: string;
+  confidence: number;
+  method?: string;
+}
+
+export type OcrPageAdapter = (params: {
+  bookId: string;
+  pageNumber: number;
+  totalPages: number;
+  pageProxy?: unknown;
+}) => Promise<OcrPageResult | null>;
 
 export interface KnownDriveBookMapping {
   bookId: string;
@@ -126,7 +157,6 @@ export function extractGoogleDriveFileId(rawInput: string): string {
   const trimmed = rawInput.trim();
   if (!trimmed) return '';
 
-  // Match /file/d/{id} or /folders/{id} or id={id}
   const fileMatch = trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]{10,})/);
   if (fileMatch?.[1]) return fileMatch[1];
 
@@ -137,6 +167,56 @@ export function extractGoogleDriveFileId(rawInput: string): string {
   if (paramMatch?.[1]) return paramMatch[1];
 
   return trimmed;
+}
+
+export function hasPdfSignature(bytes: ArrayBuffer): boolean {
+  if (!bytes || bytes.byteLength < 5) return false;
+  const header = new Uint8Array(bytes, 0, Math.min(16, bytes.byteLength));
+  for (let i = 0; i <= header.length - 5; i++) {
+    if (
+      header[i] === 0x25 &&
+      header[i + 1] === 0x50 &&
+      header[i + 2] === 0x44 &&
+      header[i + 3] === 0x46 &&
+      header[i + 4] === 0x2d
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export async function computeSha256Hex(buffer: ArrayBuffer): Promise<string> {
+  if (typeof crypto !== 'undefined' && crypto.subtle?.digest) {
+    const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+  // Deterministic fallback hash if crypto.subtle is unavailable
+  const bytes = new Uint8Array(buffer);
+  let h1 = 0xdeadbeef ^ bytes.length;
+  let h2 = 0x41c6ce57 ^ bytes.length;
+  for (let i = 0; i < bytes.length; i++) {
+    const ch = bytes[i];
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (
+    (h1 >>> 0).toString(16).padStart(8, '0') +
+    (h2 >>> 0).toString(16).padStart(8, '0') +
+    bytes.byteLength.toString(16).padStart(16, '0')
+  ).padEnd(64, '0');
+}
+
+export function computeContentHash(text: string): string {
+  let h1 = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h1 ^= text.charCodeAt(i);
+    h1 = Math.imul(h1, 0x01000193);
+  }
+  return `fnv1a-${(h1 >>> 0).toString(16).padStart(8, '0')}-${text.length}`;
 }
 
 export function inferCategoryFromText(text: string): {
@@ -239,6 +319,11 @@ export async function getDriveFileMetadata(
   if (!res.ok) {
     const errData = await res.json().catch(() => ({}));
     const msg = errData?.error?.message || `HTTP ${res.status}`;
+    if (res.status === 401 || res.status === 403) {
+      throw new Error(
+        `Google Drive authorization error (HTTP ${res.status}) for ID ${cleanId}: ${msg}`
+      );
+    }
     throw new Error(`Google Drive API error for ID ${cleanId}: ${msg}`);
   }
 
@@ -308,43 +393,79 @@ export async function listFolderChildFiles(
   return (data.files || []) as DriveFileItem[];
 }
 
-async function downloadDriveFileBuffer(
-  accessToken: string,
-  fileId: string,
-  onDownloadProgress?: (loaded: number, total: number) => void
+export interface DownloadLimitsOptions {
+  maxFileSizeBytes?: number;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  expectedFileSize?: number;
+  onDownloadProgress?: (loaded: number, total: number) => void;
+}
+
+export async function readLimitedResponseBuffer(
+  res: Response,
+  options: DownloadLimitsOptions = {}
 ): Promise<ArrayBuffer> {
-  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(
-    fileId
-  )}?alt=media&supportsAllDrives=true`;
+  const maxFileSizeBytes = options.maxFileSizeBytes ?? 250 * 1024 * 1024; // 250 MB
+  const timeoutMs = options.timeoutMs ?? 120_000;
+  const contentLength = Number(res.headers?.get?.('content-length') || 0);
+  const expectedTotal = contentLength || options.expectedFileSize || 0;
 
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${accessToken}` }
-  });
-
-  if (!res.ok) {
-    const errData = await res.json().catch(() => ({}));
+  if (expectedTotal > maxFileSizeBytes) {
     throw new Error(
-      errData?.error?.message || `Failed to download PDF binary from Google Drive (${res.status})`
+      `PDF file size (${expectedTotal} bytes) exceeds maximum limit (${maxFileSizeBytes} bytes).`
     );
   }
 
-  const contentLength = Number(res.headers.get('content-length') || 0);
-  if (!res.body || !onDownloadProgress) {
-    return await res.arrayBuffer();
+  if (!res.body || typeof res.body.getReader !== 'function') {
+    const buf = await res.arrayBuffer();
+    if (buf.byteLength > maxFileSizeBytes) {
+      throw new Error(
+        `Downloaded file size (${buf.byteLength} bytes) exceeds maximum limit (${maxFileSizeBytes} bytes).`
+      );
+    }
+    if (contentLength > 0 && buf.byteLength < contentLength) {
+      throw new Error(
+        `Incomplete PDF download: expected ${contentLength} bytes, received ${buf.byteLength} bytes.`
+      );
+    }
+    options.onDownloadProgress?.(buf.byteLength, expectedTotal || buf.byteLength);
+    return buf;
   }
 
   const reader = res.body.getReader();
   const chunks: Uint8Array[] = [];
   let receivedLength = 0;
+  const startedAt = Date.now();
 
   while (true) {
+    if (options.signal?.aborted) {
+      await reader.cancel().catch(() => {});
+      throw new Error('PDF download was cancelled by the user.');
+    }
+    if (Date.now() - startedAt > timeoutMs) {
+      await reader.cancel().catch(() => {});
+      throw new Error(`PDF download timed out after ${timeoutMs}ms.`);
+    }
+
     const { done, value } = await reader.read();
     if (done) break;
     if (value) {
+      receivedLength += value.byteLength;
+      if (receivedLength > maxFileSizeBytes) {
+        await reader.cancel().catch(() => {});
+        throw new Error(
+          `Downloaded stream (${receivedLength} bytes) exceeds maximum limit (${maxFileSizeBytes} bytes).`
+        );
+      }
       chunks.push(value);
-      receivedLength += value.length;
-      onDownloadProgress(receivedLength, contentLength || receivedLength);
+      options.onDownloadProgress?.(receivedLength, expectedTotal || receivedLength);
     }
+  }
+
+  if (contentLength > 0 && receivedLength < contentLength) {
+    throw new Error(
+      `Incomplete PDF stream: expected ${contentLength} bytes, received ${receivedLength} bytes.`
+    );
   }
 
   const combined = new Uint8Array(receivedLength);
@@ -355,6 +476,50 @@ async function downloadDriveFileBuffer(
   }
 
   return combined.buffer;
+}
+
+export async function downloadDriveFileBuffer(
+  accessToken: string,
+  fileId: string,
+  onDownloadProgress?: (loaded: number, total: number) => void,
+  limits?: Omit<DownloadLimitsOptions, 'onDownloadProgress'>
+): Promise<ArrayBuffer> {
+  const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(
+    fileId
+  )}?alt=media&supportsAllDrives=true`;
+
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    signal: limits?.signal
+  });
+
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    const msg =
+      errData?.error?.message || `Failed to download PDF binary from Google Drive (${res.status})`;
+    if (res.status === 401 || res.status === 403) {
+      throw new Error(`Google Drive authorization error (HTTP ${res.status}): ${msg}`);
+    }
+    throw new Error(msg);
+  }
+
+  const contentType = (res.headers.get('content-type') || '').toLowerCase();
+  if (contentType.includes('text/html')) {
+    throw new Error(
+      'Google Drive returned an HTML page instead of a PDF binary (check permissions or authentication).'
+    );
+  }
+
+  const buffer = await readLimitedResponseBuffer(res, {
+    ...limits,
+    onDownloadProgress
+  });
+
+  if (!hasPdfSignature(buffer)) {
+    throw new Error('Downloaded content from Google Drive is not a valid PDF (missing %PDF- signature).');
+  }
+
+  return buffer;
 }
 
 async function exportGoogleDocText(accessToken: string, fileId: string): Promise<string> {
@@ -373,7 +538,16 @@ async function exportGoogleDocText(accessToken: string, fileId: string): Promise
 }
 
 let pdfjsConfigured = false;
+let customPdfJsLoaderForTest: (() => Promise<any>) | null = null;
+
+export function setCustomPdfJsLoaderForTest(loader: (() => Promise<any>) | null): void {
+  customPdfJsLoaderForTest = loader;
+}
+
 async function getPdfJs() {
+  if (customPdfJsLoaderForTest) {
+    return await customPdfJsLoaderForTest();
+  }
   const pdfjsLib = await import('pdfjs-dist');
   if (!pdfjsConfigured && typeof window !== 'undefined') {
     try {
@@ -389,7 +563,12 @@ async function getPdfJs() {
   return pdfjsLib;
 }
 
-function reconstructVerbatimPageText(items: Array<Record<string, unknown>>): string {
+/**
+ * Reconstructs verbatim page text from PDF.js text items, preserving reading order,
+ * full Unicode (Arabic, English, Greek, mathematical & clinical symbols), paragraph breaks,
+ * and multi-space column separation for tables without any truncation.
+ */
+export function reconstructVerbatimPageText(items: Array<Record<string, unknown>>): string {
   interface PositionedItem {
     str: string;
     x: number;
@@ -411,7 +590,6 @@ function reconstructVerbatimPageText(items: Array<Record<string, unknown>>): str
 
   if (positioned.length === 0) return '';
 
-  // Sort top-to-bottom (descending Y in PDF coordinate space), then left-to-right (ascending X)
   positioned.sort((a, b) => {
     const yDiff = b.y - a.y;
     if (Math.abs(yDiff) > 3.5) return yDiff;
@@ -435,7 +613,6 @@ function reconstructVerbatimPageText(items: Array<Record<string, unknown>>): str
         if (currentLine.trim()) {
           lines.push(currentLine.trimEnd());
         }
-        // Add an extra blank line for paragraph breaks
         if (yDelta > 14 && lines.length > 0 && lines[lines.length - 1] !== '') {
           lines.push('');
         }
@@ -477,7 +654,7 @@ function reconstructVerbatimPageText(items: Array<Record<string, unknown>>): str
   return lines.join('\n').trim();
 }
 
-function detectPageHeading(pageText: string, pageNum: number): string {
+export function detectPageHeading(pageText: string, pageNum: number): string {
   const lines = pageText
     .split('\n')
     .map(l => l.trim())
@@ -485,200 +662,669 @@ function detectPageHeading(pageText: string, pageNum: number): string {
 
   for (const line of lines.slice(0, 8)) {
     if (
-      /^(?:CHAPTER|Chapter|SECTION|Section|PART|Part|MODULE|Module|UNIT|Unit)\s+[0-9IVXLCDM]+/i.test(
+      /^(?:CHAPTER|Chapter|SECTION|Section|PART|Part|MODULE|Module|UNIT|Unit|الفصل|القسم|الباب)\s+[0-9IVXLCDMأ-ي]+/i.test(
         line
       )
     ) {
       const nextLine = lines[lines.indexOf(line) + 1];
-      if (nextLine && nextLine.length < 110 && !nextLine.endsWith('.')) {
+      if (nextLine && nextLine.length < 120 && !nextLine.endsWith('.')) {
         return `${line}: ${nextLine}`;
       }
-      return line.slice(0, 110);
+      return line.slice(0, 120);
     }
   }
 
-  const firstMeaningful = lines.find(l => l.length >= 6 && l.length <= 105);
-  return firstMeaningful ? firstMeaningful : `Verbatim Page ${pageNum}`;
+  const firstMeaningful = lines.find(l => l.length >= 4 && l.length <= 120);
+  return firstMeaningful ? firstMeaningful : `Page ${pageNum}`;
 }
 
-function extractTablesFromPageText(pageText: string, pageNum: number): VerbatimReferenceTable[] {
-  const lines = pageText.split('\n').map(l => l.trim());
-  const tabularLines = lines.filter(l => l.includes('   ') && l.split(/\s{3,}/).length >= 3);
-  if (tabularLines.length < 3) return [];
+function splitTableCells(line: string): string[] {
+  if (line.includes('|')) {
+    const parts = line
+      .split('|')
+      .map(c => c.trim())
+      .filter((c, idx, arr) => !(idx === 0 && !c) && !(idx === arr.length - 1 && !c));
+    if (parts.length >= 2) return parts;
+  }
+  if (line.includes('\t')) {
+    const parts = line
+      .split(/\t+/)
+      .map(c => c.trim())
+      .filter(Boolean);
+    if (parts.length >= 2) return parts;
+  }
+  if (/\s{3,}/.test(line)) {
+    const parts = line
+      .split(/\s{3,}/)
+      .map(c => c.trim())
+      .filter(Boolean);
+    if (parts.length >= 2) return parts;
+  }
+  return [];
+}
 
-  const rows = tabularLines.slice(0, 16).map(l => l.split(/\s{3,}/).slice(0, 5));
-  const colCount = Math.max(...rows.map(r => r.length));
-  if (colCount < 2) return [];
+/**
+ * Extracts all tables from a page without any row or column truncation.
+ * Preserves captions, headers, all rows, all columns, units, footnotes, and rawText.
+ * Marks tables with irregular column alignment as `needs_review`.
+ */
+export function extractTablesFromPageText(
+  pageText: string,
+  pageNum: number,
+  bookId: string = 'book',
+  chapterId: string = 'ch-1'
+): VerbatimReferenceTable[] {
+  const lines = pageText.split('\n');
+  const extractedTables: VerbatimReferenceTable[] = [];
 
-  const normalizedRows = rows.map(r => {
-    const padded = [...r];
-    while (padded.length < colCount) padded.push('—');
-    return padded;
-  });
+  interface TableBlock {
+    caption: string;
+    rawLines: string[];
+    parsedRows: string[][];
+    footnotes: string[];
+  }
 
-  return [
-    {
-      title: `Page ${pageNum} Extracted Reference Table`,
-      titleAr: `جدول مستخرج من الصفحة الأصلية رقم ${pageNum}`,
-      headers: normalizedRows[0],
-      rows: normalizedRows.slice(1)
+  const blocks: TableBlock[] = [];
+  let currentBlock: TableBlock | null = null;
+  let lastNonTableLine = '';
+
+  for (let i = 0; i < lines.length; i++) {
+    const rawLine = lines[i].trim();
+    if (!rawLine) {
+      if (currentBlock && currentBlock.parsedRows.length >= 2) {
+        blocks.push(currentBlock);
+        currentBlock = null;
+      }
+      continue;
     }
-  ];
+
+    // Check if this is a separator line like |---|---|
+    if (/^[\s|:-]+$/.test(rawLine) && rawLine.includes('-')) {
+      continue;
+    }
+
+    const cells = splitTableCells(rawLine);
+    if (cells.length >= 2) {
+      if (!currentBlock) {
+        const captionCandidate =
+          /^(?:Table|TABLE|جدول)\b/i.test(lastNonTableLine)
+            ? lastNonTableLine
+            : `Page ${pageNum} Extracted Reference Table ${blocks.length + 1}`;
+        currentBlock = {
+          caption: captionCandidate,
+          rawLines: [rawLine],
+          parsedRows: [cells],
+          footnotes: []
+        };
+      } else {
+        currentBlock.rawLines.push(rawLine);
+        currentBlock.parsedRows.push(cells);
+      }
+    } else {
+      if (
+        currentBlock &&
+        /^(?:\*|†|‡|§|Note:|Notes:|Abbreviations:|Units:|ملاحظة:|اختصارات:)/i.test(rawLine)
+      ) {
+        currentBlock.footnotes.push(rawLine);
+        currentBlock.rawLines.push(rawLine);
+      } else {
+        if (currentBlock && currentBlock.parsedRows.length >= 2) {
+          blocks.push(currentBlock);
+        }
+        currentBlock = null;
+        lastNonTableLine = rawLine;
+      }
+    }
+  }
+
+  if (currentBlock && currentBlock.parsedRows.length >= 2) {
+    blocks.push(currentBlock);
+  }
+
+  for (let bIdx = 0; bIdx < blocks.length; bIdx++) {
+    const blk = blocks[bIdx];
+    const colCounts = blk.parsedRows.map(r => r.length);
+    const maxCols = Math.max(...colCounts);
+    const minCols = Math.min(...colCounts);
+    if (maxCols < 2) continue;
+
+    // If column count varies widely across rows, flag as needs_review while preserving rawText
+    const isConsistent = maxCols - minCols <= 1;
+    const extractionStatus: 'structured' | 'needs_review' = isConsistent
+      ? 'structured'
+      : 'needs_review';
+
+    // Normalize all rows to maxCols without slicing/truncating any columns or rows
+    const normalizedRows = blk.parsedRows.map(r => {
+      const padded = [...r];
+      while (padded.length < maxCols) padded.push('—');
+      return padded;
+    });
+
+    const headers = normalizedRows[0];
+    const dataRows = normalizedRows.slice(1);
+    const unitsAndFootnotes = blk.footnotes.length > 0 ? blk.footnotes.join('\n') : undefined;
+    const rawText = blk.rawLines.join('\n');
+    const tableId = `${bookId}-p${pageNum}-tbl-${bIdx + 1}`;
+
+    extractedTables.push({
+      id: tableId,
+      title: blk.caption,
+      titleAr: `جدول مرجعي مستخرج من الصفحة الأصلية رقم ${pageNum}`,
+      headers,
+      rows: dataRows,
+      pageNumber: pageNum,
+      chapterId,
+      unitsAndFootnotes,
+      rawText,
+      structuredData: {
+        columnCount: maxCols,
+        rowCount: dataRows.length,
+        hasFootnotes: Boolean(unitsAndFootnotes),
+        isConsistent
+      },
+      extractionStatus
+    });
+  }
+
+  return extractedTables;
 }
 
-export function hasPdfSignature(bytes: ArrayBuffer): boolean {
-  if (bytes.byteLength < 5) return false;
-  const header = new Uint8Array(bytes, 0, 5);
-  return header[0] === 0x25 && header[1] === 0x50 && header[2] === 0x44 &&
-    header[3] === 0x46 && header[4] === 0x2d;
+export interface OutlineNodeRecord {
+  id: string;
+  parentId: string | null;
+  title: string;
+  startPage: number;
+  endPage?: number;
+  hierarchyLevel: number;
 }
 
-export async function parsePdfBufferToFullBookRecord(options: {
+/**
+ * Recursively extracts all levels of the PDF outline/bookmarks without any depth truncation.
+ */
+export async function extractFullPdfOutlineHierarchy(
+  pdfDoc: any,
+  bookId: string,
+  totalPages: number
+): Promise<OutlineNodeRecord[]> {
+  const outlineEntries: OutlineNodeRecord[] = [];
+  try {
+    const rawOutline = await pdfDoc.getOutline();
+    if (!Array.isArray(rawOutline) || rawOutline.length === 0) {
+      return [];
+    }
+
+    let counter = 0;
+    const traverse = async (
+      items: Array<Record<string, unknown>>,
+      parentId: string | null,
+      hierarchyLevel: number
+    ) => {
+      for (const item of items) {
+        const title = String(item.title || '').trim();
+        let resolvedPage = 1;
+        let hasValidPage = false;
+
+        let dest = item.dest;
+        if (typeof dest === 'string' && typeof pdfDoc.getDestination === 'function') {
+          try {
+            dest = await pdfDoc.getDestination(dest);
+          } catch {
+            dest = null;
+          }
+        }
+        if (typeof item.pageNumber === 'number' && item.pageNumber >= 1 && item.pageNumber <= totalPages) {
+          resolvedPage = item.pageNumber;
+          hasValidPage = true;
+        } else if (Array.isArray(dest) && dest[0] && typeof pdfDoc.getPageIndex === 'function') {
+          try {
+            const pageIdx = await pdfDoc.getPageIndex(dest[0]);
+            if (pageIdx >= 0 && pageIdx < totalPages) {
+              resolvedPage = pageIdx + 1;
+              hasValidPage = true;
+            }
+          } catch {
+            // ignore unresolvable destination ref
+          }
+        }
+
+        counter++;
+        const nodeId = `${bookId}-outline-${counter}-L${hierarchyLevel}`;
+        if (title && hasValidPage) {
+          outlineEntries.push({
+            id: nodeId,
+            parentId,
+            title,
+            startPage: resolvedPage,
+            hierarchyLevel
+          });
+        }
+
+        if (Array.isArray(item.items) && item.items.length > 0) {
+          await traverse(
+            item.items as Array<Record<string, unknown>>,
+            title && hasValidPage ? nodeId : parentId,
+            hierarchyLevel + 1
+          );
+        }
+      }
+    };
+
+    await traverse(rawOutline as Array<Record<string, unknown>>, null, 1);
+  } catch {
+    // Outline not available in PDF
+  }
+  return outlineEntries;
+}
+
+async function detectPageHasImagesOrGraphics(page: any): Promise<{
+  hasImages: boolean;
+  hasAnyOperators: boolean;
+}> {
+  if (typeof page.hasImages === 'boolean') {
+    return {
+      hasImages: page.hasImages,
+      hasAnyOperators: page.hasImages || Boolean(page.hasOperators ?? true)
+    };
+  }
+  if (typeof page.getOperatorList === 'function') {
+    try {
+      const opList = await page.getOperatorList();
+      const fnArray: number[] = Array.isArray(opList?.fnArray) ? opList.fnArray : [];
+      if (fnArray.length === 0) {
+        return { hasImages: false, hasAnyOperators: false };
+      }
+      // Standard PDF.js OPS codes for paintImageXObject (85), paintInlineImageXObject (86), paintImageMaskXObject (83)
+      const imageOpCodes = new Set([82, 83, 84, 85, 86, 87, 88]);
+      const hasImages = fnArray.some(code => imageOpCodes.has(code));
+      return { hasImages, hasAnyOperators: fnArray.length > 2 };
+    } catch {
+      return { hasImages: true, hasAnyOperators: true };
+    }
+  }
+  return { hasImages: true, hasAnyOperators: true };
+}
+
+export interface ParsePdfOptions {
   pdfBytes: ArrayBuffer;
   bookId: string;
   driveFileId: string;
   fileName: string;
+  sourceFileName?: string;
+  displayTitle?: string;
+  sourceType?: BookSourceType;
+  batchSize?: number;
+  resumeFromCheckpoint?: boolean;
+  forceReprocess?: boolean;
+  maxPagesToProcessInRun?: number;
+  ocrAdapter?: OcrPageAdapter;
   onProgress?: (progress: BookSyncProgress) => void;
-}): Promise<SyncedFullBookRecord> {
-  const { pdfBytes, bookId, driveFileId, fileName, onProgress } = options;
+}
+
+export async function parsePdfBufferToFullBookRecord(
+  options: ParsePdfOptions
+): Promise<SyncedFullBookRecord> {
+  const {
+    pdfBytes,
+    bookId,
+    driveFileId,
+    fileName,
+    sourceFileName = fileName,
+    displayTitle,
+    sourceType = 'google_drive_pdf',
+    batchSize = 10,
+    resumeFromCheckpoint = true,
+    forceReprocess = false,
+    maxPagesToProcessInRun,
+    ocrAdapter,
+    onProgress
+  } = options;
+
+  const startedAt = new Date().toISOString();
+  const jobId = `job-${bookId}-${Date.now()}`;
+  const warnings: string[] = [];
+  const errors: string[] = [];
+
+  // Stage 1 & 3: Check PDF signature & calculate SHA-256
   if (!hasPdfSignature(pdfBytes)) {
-    throw new Error('Downloaded content is not a valid PDF response (missing %PDF- signature).');
+    const errMsg = 'Downloaded content is not a valid PDF response (missing %PDF- signature).';
+    await saveBookImportJob({
+      id: jobId,
+      bookId,
+      sourceFileName,
+      sourceType,
+      fileSize: pdfBytes?.byteLength || 0,
+      sha256: '',
+      jobStatus: 'failed',
+      currentStage: 'signature_verification',
+      lastProcessedPage: 0,
+      originalPageCount: 0,
+      processedPageCount: 0,
+      extractedTextPageCount: 0,
+      ocrPageCount: 0,
+      unprocessedPageCount: 0,
+      blankPageCount: 0,
+      sectionsSavedCount: 0,
+      tablesSavedCount: 0,
+      dbSaveStatus: 'failed',
+      searchIndexStatus: 'failed',
+      finalVerificationStatus: 'failed',
+      startedAt,
+      completedAt: new Date().toISOString(),
+      errorCode: 'INVALID_PDF_SIGNATURE',
+      safeErrorMessage: errMsg,
+      warnings,
+      errors: [errMsg],
+      retryCount: 0
+    });
+    throw new Error(errMsg);
   }
-  const pdfjsLib = await getPdfJs();
 
-  // Clone buffer so pdf.js worker transfer doesn't detach the caller's ArrayBuffer
-  const bufferCopy = pdfBytes.slice(0);
-  const loadingTask = pdfjsLib.getDocument({
-    data: new Uint8Array(bufferCopy),
-    useSystemFonts: true
-  });
+  const sha256 = await computeSha256Hex(pdfBytes);
 
-  const pdfDoc = await loadingTask.promise;
-  const totalPages = pdfDoc.numPages;
-
-  // Attempt to extract PDF Outline (Table of Contents bookmarks)
-  interface OutlineEntry {
-    title: string;
-    startPage: number;
-  }
-  const outlineEntries: OutlineEntry[] = [];
-
-  try {
-    const rawOutline = await pdfDoc.getOutline();
-    if (Array.isArray(rawOutline) && rawOutline.length > 0) {
-      const flattenOutline = async (items: Array<Record<string, unknown>>, depth = 0) => {
-        for (const item of items) {
-          if (depth > 1) continue;
-          const title = String(item.title || '').trim();
-          let dest = item.dest;
-          if (typeof dest === 'string') {
-            dest = await pdfDoc.getDestination(dest);
-          }
-          if (Array.isArray(dest) && dest[0]) {
-            try {
-              const pageIdx = await pdfDoc.getPageIndex(dest[0]);
-              if (pageIdx >= 0 && pageIdx < totalPages && title) {
-                outlineEntries.push({
-                  title,
-                  startPage: pageIdx + 1
-                });
-              }
-            } catch {
-              // ignore unresolvable outline ref
-            }
-          }
-          if (Array.isArray(item.items) && item.items.length > 0 && depth === 0) {
-            await flattenOutline(item.items as Array<Record<string, unknown>>, depth + 1);
-          }
-        }
-      };
-      await flattenOutline(rawOutline as unknown as Array<Record<string, unknown>>);
+  // Deduplication check by SHA-256
+  if (!forceReprocess) {
+    const existingVerified = findVerifiedBookBySha256Sync(sha256);
+    if (existingVerified && existingVerified.bookId === bookId) {
+      return existingVerified;
     }
-  } catch {
-    // PDF has no embedded outline; chapter boundaries will be detected from page headings
   }
 
-  const rawPages: { pageNumber: number; text: string; detectedHeading: string }[] = [];
-  let totalCharacters = 0;
-  let emptyTextPagesCount = 0;
+  const pdfjsLib = await getPdfJs();
+  const bufferCopy = pdfBytes.slice(0);
 
-  for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
-    if (pageNum === 1 || pageNum % 5 === 0 || pageNum === totalPages) {
+  let pdfDoc: any;
+  try {
+    const loadingTask = pdfjsLib.getDocument({
+      data: new Uint8Array(bufferCopy),
+      useSystemFonts: true
+    });
+    pdfDoc = await loadingTask.promise;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Corrupt or unreadable PDF binary';
+    await saveBookImportJob({
+      id: jobId,
+      bookId,
+      sourceFileName,
+      sourceType,
+      fileSize: pdfBytes.byteLength,
+      sha256,
+      jobStatus: 'failed',
+      currentStage: 'pdf_open',
+      lastProcessedPage: 0,
+      originalPageCount: 0,
+      processedPageCount: 0,
+      extractedTextPageCount: 0,
+      ocrPageCount: 0,
+      unprocessedPageCount: 0,
+      blankPageCount: 0,
+      sectionsSavedCount: 0,
+      tablesSavedCount: 0,
+      dbSaveStatus: 'failed',
+      searchIndexStatus: 'failed',
+      finalVerificationStatus: 'failed',
+      startedAt,
+      completedAt: new Date().toISOString(),
+      errorCode: 'PDF_PARSE_ERROR',
+      safeErrorMessage: msg,
+      warnings,
+      errors: [msg],
+      retryCount: 0
+    });
+    throw new Error(`Failed to open PDF document: ${msg}`);
+  }
+
+  const totalPages = Number(pdfDoc.numPages || 0);
+  if (totalPages <= 0) {
+    throw new Error('PDF document contains 0 pages.');
+  }
+
+  // Stage 4: Check for existing batch checkpoint to resume from lastProcessedPage
+  let checkpoint: BookBatchCheckpointRecord | null = null;
+  if (resumeFromCheckpoint && !forceReprocess) {
+    const existingCp = await getBookBatchCheckpoint(bookId);
+    if (existingCp && existingCp.sha256 === sha256 && existingCp.originalPageCount === totalPages) {
+      checkpoint = existingCp;
+    }
+  }
+
+  const outlineEntries: OutlineNodeRecord[] =
+    checkpoint?.outlineEntries && checkpoint.outlineEntries.length > 0
+      ? checkpoint.outlineEntries
+      : await extractFullPdfOutlineHierarchy(pdfDoc, bookId, totalPages);
+
+  const pageMap = new Map<number, FullBookPageRecord>();
+  const tableMap = new Map<string, StructuredBookTableRecord>();
+
+  if (checkpoint) {
+    for (const p of checkpoint.processedPages) {
+      pageMap.set(p.pageNumber, p);
+    }
+    for (const t of checkpoint.tables) {
+      tableMap.set(t.id, t);
+    }
+  }
+
+  const startPageNum = checkpoint ? Math.min(totalPages + 1, checkpoint.lastProcessedPage + 1) : 1;
+  const endPageNum = maxPagesToProcessInRun
+    ? Math.min(totalPages, startPageNum + maxPagesToProcessInRun - 1)
+    : totalPages;
+
+  // Stage 5 & 6 & 7: Process pages in resumable batches
+  for (let batchStart = startPageNum; batchStart <= endPageNum; batchStart += batchSize) {
+    const batchEnd = Math.min(endPageNum, batchStart + batchSize - 1);
+
+    for (let pageNum = batchStart; pageNum <= batchEnd; pageNum++) {
       onProgress?.({
         bookId,
-        fileName,
+        fileName: sourceFileName,
         phase: 'indexing',
+        stageNumber: 5,
+        stageLabel: 'Extracting text & tables in batches',
         currentPage: pageNum,
         totalPages,
-        message: `Extracting verbatim page ${pageNum} of ${totalPages}...`
+        processingStatus: 'extracting',
+        message: `Extracting page ${pageNum} of ${totalPages} from "${sourceFileName}"...`
       });
+
+      const page = await pdfDoc.getPage(pageNum);
+      const textContent = await page.getTextContent();
+      const verbatimText = reconstructVerbatimPageText(
+        (textContent.items || []) as Array<Record<string, unknown>>
+      );
+
+      let extractedText = verbatimText;
+      let ocrText: string | null = null;
+      let extractionMethod: PageExtractionMethod = 'native_text';
+      let extractionStatus: PageExtractionStatus = 'extracted';
+      let ocrConfidence: number | null = null;
+      let hasEmbeddedImages = false;
+
+      if (!verbatimText.trim()) {
+        const imgCheck = await detectPageHasImagesOrGraphics(page);
+        hasEmbeddedImages = imgCheck.hasImages;
+
+        if (!imgCheck.hasImages && !imgCheck.hasAnyOperators) {
+          // Genuinely blank page
+          extractedText = '';
+          extractionMethod = 'blank';
+          extractionStatus = 'blank';
+        } else if (ocrAdapter) {
+          // Stage 6: Execute authorized OCR adapter on scanned/graphical page
+          onProgress?.({
+            bookId,
+            fileName: sourceFileName,
+            phase: 'ocr',
+            stageNumber: 6,
+            stageLabel: 'Executing OCR on scanned page',
+            currentPage: pageNum,
+            totalPages,
+            processingStatus: 'extracting',
+            message: `Running OCR on scanned page ${pageNum} of ${totalPages}...`
+          });
+          try {
+            const ocrRes = await ocrAdapter({
+              bookId,
+              pageNumber: pageNum,
+              totalPages,
+              pageProxy: page
+            });
+            if (ocrRes && ocrRes.ocrText.trim().length > 0) {
+              ocrText = ocrRes.ocrText.trim();
+              ocrConfidence = ocrRes.confidence;
+              extractionMethod = 'ocr';
+              extractionStatus = 'ocr_completed';
+            } else {
+              extractionMethod = 'unprocessed';
+              extractionStatus = 'needs_ocr';
+              warnings.push(`Page ${pageNum} has no extractable text layer and requires OCR.`);
+            }
+          } catch (ocrErr: unknown) {
+            extractionMethod = 'unprocessed';
+            extractionStatus = 'needs_ocr';
+            warnings.push(
+              `Page ${pageNum} OCR failed (${
+                ocrErr instanceof Error ? ocrErr.message : 'OCR error'
+              }); marked as needs_ocr.`
+            );
+          }
+        } else {
+          // Never fabricate placeholder text! Mark accurately as unprocessed / needs_ocr.
+          extractedText = '';
+          ocrText = null;
+          extractionMethod = 'unprocessed';
+          extractionStatus = 'needs_ocr';
+          warnings.push(`Page ${pageNum} contains scanned/graphical content without a text layer (needs_ocr).`);
+        }
+      }
+
+      const effectivePageText = extractedText || ocrText || '';
+      const contentHash = computeContentHash(effectivePageText);
+
+      const pageRecord: FullBookPageRecord = {
+        id: `${bookId}-page-${pageNum}`,
+        bookId,
+        pageNumber: pageNum,
+        originalPageNumber: pageNum,
+        text: effectivePageText,
+        extractedText,
+        ocrText,
+        extractionMethod,
+        extractionStatus,
+        ocrConfidence,
+        hasEmbeddedImages,
+        contentHash,
+        chapterId: '',
+        chapterTitle: '',
+        sectionId: '',
+        lineCount: effectivePageText ? effectivePageText.split('\n').length : 0
+      };
+      pageMap.set(pageNum, pageRecord);
+
+      if (effectivePageText.trim().length > 0) {
+        const pageTables = extractTablesFromPageText(effectivePageText, pageNum, bookId, '');
+        for (const tbl of pageTables) {
+          const tableId = tbl.id || `${bookId}-p${pageNum}-tbl-${tableMap.size + 1}`;
+          tableMap.set(tableId, {
+            id: tableId,
+            bookId,
+            chapterId: '',
+            pageNumber: pageNum,
+            caption: tbl.title,
+            captionAr: tbl.titleAr,
+            headers: tbl.headers,
+            rows: tbl.rows,
+            unitsAndFootnotes: tbl.unitsAndFootnotes,
+            rawText: tbl.rawText || '',
+            structuredData: tbl.structuredData || {},
+            extractionStatus: tbl.extractionStatus || 'structured'
+          });
+        }
+      }
     }
 
-    const page = await pdfDoc.getPage(pageNum);
-    const textContent = await page.getTextContent();
-    const verbatimText = reconstructVerbatimPageText(
-      (textContent.items || []) as Array<Record<string, unknown>>
+    // Save batch checkpoint after every batch
+    const sortedPagesSoFar = Array.from(pageMap.values()).sort(
+      (a, b) => a.pageNumber - b.pageNumber
     );
-
-    if (!verbatimText.trim()) emptyTextPagesCount += 1;
-    const finalPageText =
-      verbatimText ||
-      `[Page ${pageNum} of ${fileName} — Graphical/Scanned Figure Page. Switch to "Original PDF Page View" tab above to view the visual page.]`;
-
-    totalCharacters += finalPageText.length;
-    rawPages.push({
-      pageNumber: pageNum,
-      text: finalPageText,
-      detectedHeading: detectPageHeading(finalPageText, pageNum)
+    await saveBookBatchCheckpoint({
+      bookId,
+      sha256,
+      sourceFileName,
+      sourceType,
+      driveFileId,
+      originalPageCount: totalPages,
+      lastProcessedPage: batchEnd,
+      processedPages: sortedPagesSoFar,
+      tables: Array.from(tableMap.values()),
+      outlineEntries,
+      updatedAt: new Date().toISOString()
     });
   }
 
-  // Group pages into structured chapters covering 100% of pages (1..totalPages)
+  const allProcessedPages = Array.from(pageMap.values()).sort(
+    (a, b) => a.pageNumber - b.pageNumber
+  );
+
+  // Build chapter hierarchy covering all processed pages while preserving multi-level outline nodes
   interface ChapterBoundary {
+    id: string;
+    parentChapterId: string | null;
+    hierarchyLevel: number;
     title: string;
     startPage: number;
     endPage: number;
   }
 
   const boundaries: ChapterBoundary[] = [];
-  const sortedOutline = outlineEntries
-    .filter((e, idx, arr) => idx === arr.findIndex(o => o.startPage === e.startPage))
-    .sort((a, b) => a.startPage - b.startPage);
+  if (outlineEntries.length >= 1) {
+    const sortedOutline = [...outlineEntries].sort((a, b) => {
+      if (a.startPage !== b.startPage) return a.startPage - b.startPage;
+      return a.hierarchyLevel - b.hierarchyLevel;
+    });
 
-  if (sortedOutline.length >= 2) {
-    // Ensure page 1 is covered
     if (sortedOutline[0].startPage > 1) {
       boundaries.push({
+        id: `${bookId}-front-matter-pp-1-${sortedOutline[0].startPage - 1}`,
+        parentChapterId: null,
+        hierarchyLevel: 1,
         title: 'Front Matter, Preface & Table of Contents',
         startPage: 1,
         endPage: sortedOutline[0].startPage - 1
       });
     }
+
     for (let i = 0; i < sortedOutline.length; i++) {
       const current = sortedOutline[i];
-      const next = sortedOutline[i + 1];
-      const endPage = next ? Math.max(current.startPage, next.startPage - 1) : totalPages;
+      // Find next sibling or higher-level node to determine endPage
+      let nextPageBoundary = totalPages;
+      for (let j = i + 1; j < sortedOutline.length; j++) {
+        if (sortedOutline[j].startPage > current.startPage) {
+          nextPageBoundary = sortedOutline[j].startPage - 1;
+          break;
+        }
+      }
       boundaries.push({
+        id: current.id,
+        parentChapterId: current.parentId,
+        hierarchyLevel: current.hierarchyLevel,
         title: current.title,
         startPage: current.startPage,
-        endPage
+        endPage: Math.max(current.startPage, nextPageBoundary)
       });
     }
   } else {
-    // Detect "Chapter X" / "Section X" headings from page text, or chunk every 15 pages
     const detectedStarts: { title: string; startPage: number }[] = [];
-    for (const p of rawPages) {
+    for (const p of allProcessedPages) {
+      const heading = detectPageHeading(p.text, p.pageNumber);
       if (
-        /^(?:CHAPTER|Chapter|SECTION|Section|PART|Part|MODULE|Module)\s+[0-9IVXLCDM]+/i.test(
-          p.detectedHeading
+        /^(?:CHAPTER|Chapter|SECTION|Section|PART|Part|MODULE|Module|الفصل|القسم)\s+[0-9IVXLCDMأ-ي]+/i.test(
+          heading
         )
       ) {
         const last = detectedStarts[detectedStarts.length - 1];
-        if (!last || p.pageNumber - last.startPage >= 3) {
-          detectedStarts.push({
-            title: p.detectedHeading,
-            startPage: p.pageNumber
-          });
+        if (!last || p.pageNumber - last.startPage >= 2) {
+          detectedStarts.push({ title: heading, startPage: p.pageNumber });
         }
       }
     }
@@ -686,7 +1332,10 @@ export async function parsePdfBufferToFullBookRecord(options: {
     if (detectedStarts.length >= 2) {
       if (detectedStarts[0].startPage > 1) {
         boundaries.push({
-          title: 'Front Matter & Contents (Pages 1–' + (detectedStarts[0].startPage - 1) + ')',
+          id: `${bookId}-ch-front-matter`,
+          parentChapterId: null,
+          hierarchyLevel: 1,
+          title: `Front Matter & Contents (Pages 1–${detectedStarts[0].startPage - 1})`,
           startPage: 1,
           endPage: detectedStarts[0].startPage - 1
         });
@@ -695,6 +1344,9 @@ export async function parsePdfBufferToFullBookRecord(options: {
         const cur = detectedStarts[i];
         const next = detectedStarts[i + 1];
         boundaries.push({
+          id: `${bookId}-ch-${i + 1}-pp-${cur.startPage}`,
+          parentChapterId: null,
+          hierarchyLevel: 1,
           title: cur.title,
           startPage: cur.startPage,
           endPage: next ? Math.max(cur.startPage, next.startPage - 1) : totalPages
@@ -702,131 +1354,328 @@ export async function parsePdfBufferToFullBookRecord(options: {
       }
     } else {
       const pagesPerChapter = totalPages <= 40 ? 10 : 15;
+      let idx = 1;
       for (let start = 1; start <= totalPages; start += pagesPerChapter) {
         const end = Math.min(totalPages, start + pagesPerChapter - 1);
-        const firstPageHeading = rawPages[start - 1]?.detectedHeading || `Pages ${start}–${end}`;
+        const firstPage = pageMap.get(start);
+        const firstHeading = firstPage?.text
+          ? detectPageHeading(firstPage.text, start)
+          : `Pages ${start}–${end}`;
         boundaries.push({
-          title: `Pages ${start}–${end}: ${firstPageHeading}`,
+          id: `${bookId}-full-ch-${idx}-pp-${start}-${end}`,
+          parentChapterId: null,
+          hierarchyLevel: 1,
+          title: `Pages ${start}–${end}: ${firstHeading}`,
           startPage: start,
           endPage: end
         });
+        idx++;
       }
     }
   }
 
   const knownMapping = KNOWN_DRIVE_BOOK_MAPPINGS.find(m => m.bookId === bookId);
   const chapters: VerbatimChapter[] = [];
-  const allPageRecords: FullBookPageRecord[] = [];
+  const structuredChapters: StructuredBookChapterRecord[] = [];
+  const structuredSections: StructuredBookSectionRecord[] = [];
+  const structuredTables = Array.from(tableMap.values());
 
   for (let cIdx = 0; cIdx < boundaries.length; cIdx++) {
     const b = boundaries[cIdx];
     const chNum = cIdx + 1;
-    const chId = `${bookId}-full-ch-${chNum}-pp-${b.startPage}-${b.endPage}`;
-    const chapterPages = rawPages.slice(b.startPage - 1, b.endPage);
+    const chId = b.id || `${bookId}-full-ch-${chNum}-pp-${b.startPage}-${b.endPage}`;
+    const chapterPages = allProcessedPages.filter(
+      p => p.pageNumber >= b.startPage && p.pageNumber <= b.endPage
+    );
 
     const combinedSampleText = `${b.title} ${chapterPages
       .slice(0, 3)
-      .map(p => p.text.slice(0, 600))
+      .map(p => (p.text || '').slice(0, 600))
       .join(' ')}`;
     const inferredCat = inferCategoryFromText(combinedSampleText);
 
     const sections: VerbatimSection[] = [];
     const quickTables: VerbatimReferenceTable[] = [];
 
-    for (const p of chapterPages) {
+    for (let sIdx = 0; sIdx < chapterPages.length; sIdx++) {
+      const p = chapterPages[sIdx];
       const secId = `${chId}-page-${p.pageNumber}`;
-      sections.push({
-        id: secId,
-        number: `p.${p.pageNumber}`,
-        heading: `Page ${p.pageNumber} — ${p.detectedHeading}`,
-        headingAr: `الصفحة الأصلية رقم ${p.pageNumber} من الكتاب (${fileName})`,
-        body: p.text,
-        evidenceGrade: `Verbatim PDF Page ${p.pageNumber} / ${totalPages}`
-      });
+      const detectedHeading = p.text
+        ? detectPageHeading(p.text, p.pageNumber)
+        : p.extractionStatus === 'needs_ocr'
+        ? `Page ${p.pageNumber} (Scanned / Requires OCR)`
+        : `Page ${p.pageNumber} (Blank Page)`;
 
-      const pageTables = extractTablesFromPageText(p.text, p.pageNumber);
-      if (pageTables.length > 0 && quickTables.length < 6) {
+      p.chapterId = chId;
+      p.chapterTitle = b.title;
+      p.sectionId = secId;
+
+      const pageTables = structuredTables
+        .filter(t => t.pageNumber === p.pageNumber)
+        .map(t => {
+          t.chapterId = chId;
+          return {
+            id: t.id,
+            title: t.caption,
+            titleAr: t.captionAr || `جدول مستخرج من الصفحة الأصلية رقم ${t.pageNumber}`,
+            headers: t.headers,
+            rows: t.rows,
+            pageNumber: t.pageNumber,
+            chapterId: chId,
+            unitsAndFootnotes: t.unitsAndFootnotes,
+            rawText: t.rawText,
+            structuredData: t.structuredData,
+            extractionStatus: t.extractionStatus
+          } satisfies VerbatimReferenceTable;
+        });
+
+      // Preserve ALL extracted tables in quickTables & section tables without any < 6 cap
+      if (pageTables.length > 0) {
         quickTables.push(...pageTables);
       }
 
-      allPageRecords.push({
-        pageNumber: p.pageNumber,
-        text: p.text,
+      sections.push({
+        id: secId,
+        number: `p.${p.pageNumber}`,
+        heading: `Page ${p.pageNumber} — ${detectedHeading}`,
+        headingAr: `الصفحة الأصلية رقم ${p.pageNumber} من الملف (${sourceFileName})`,
+        body: p.extractedText || p.ocrText || '',
+        ocrBody: p.ocrText || undefined,
+        originalPageNumber: p.pageNumber,
+        extractionMethod: p.extractionMethod,
+        extractionStatus: p.extractionStatus,
+        ocrConfidence: p.ocrConfidence ?? undefined,
+        contentHash: p.contentHash,
+        tables: pageTables.length > 0 ? pageTables : undefined,
+        evidenceGrade:
+          p.extractionMethod === 'ocr'
+            ? `OCR Page ${p.pageNumber} / ${totalPages}`
+            : p.extractionMethod === 'unprocessed'
+            ? `Needs OCR • Page ${p.pageNumber} / ${totalPages}`
+            : p.extractionMethod === 'blank'
+            ? `Blank Page ${p.pageNumber} / ${totalPages}`
+            : `Native PDF Text • Page ${p.pageNumber} / ${totalPages}`
+      });
+
+      structuredSections.push({
+        id: secId,
+        bookId,
         chapterId: chId,
-        chapterTitle: b.title,
-        sectionId: secId,
-        lineCount: p.text.split('\n').length
+        pageNumber: p.pageNumber,
+        sectionOrder: sIdx + 1,
+        heading: `Page ${p.pageNumber} — ${detectedHeading}`,
+        headingAr: `الصفحة الأصلية رقم ${p.pageNumber} من الملف (${sourceFileName})`,
+        fullText: p.extractedText || p.ocrText || '',
+        extractionMethod: p.extractionMethod || 'native_text',
+        contentHash: p.contentHash || ''
       });
     }
+
+    structuredChapters.push({
+      id: chId,
+      bookId,
+      parentChapterId: b.parentChapterId,
+      chapterNumber: chNum,
+      title: b.title,
+      titleAr: `الفصل ${chNum} (الصفحات ${b.startPage}–${b.endPage} من ${sourceFileName})`,
+      startPage: b.startPage,
+      endPage: b.endPage,
+      hierarchyLevel: b.hierarchyLevel
+    });
 
     chapters.push({
       id: chId,
       bookId,
+      parentChapterId: b.parentChapterId,
+      hierarchyLevel: b.hierarchyLevel,
       chapterNumber: chNum,
+      startPage: b.startPage,
+      endPage: b.endPage,
       title: b.title,
-      titleAr: `الفصل ${chNum} (الصفحات ${b.startPage}–${b.endPage} حرفياً من ${fileName})`,
-      authors: knownMapping?.title || fileName,
-      edition: `Full Synced PDF (${totalPages} Total Pages)`,
+      titleAr: `الفصل ${chNum} (الصفحات ${b.startPage}–${b.endPage} من ${sourceFileName})`,
+      authors: knownMapping?.title || displayTitle || sourceFileName,
+      edition: `Imported PDF (${totalPages} Pages)`,
       pageRange: `pp. ${b.startPage}–${b.endPage} (of ${totalPages})`,
       systemCategory: knownMapping?.defaultCategory || inferredCat.category,
       systemCategoryAr: knownMapping?.defaultCategoryAr || inferredCat.categoryAr,
       sourceUrl: `local://ref/chapter/${chId}`,
       learningObjectives: [
-        `Complete, unabridged verbatim text of pages ${b.startPage} through ${b.endPage} extracted directly from ${fileName}.`
+        `Direct page-by-page extraction of pages ${b.startPage} through ${b.endPage} from ${sourceFileName}.`
       ],
       toc: sections.map(s => ({
         id: s.id,
         number: s.number,
-        title: s.heading
+        title: s.heading,
+        hierarchyLevel: b.hierarchyLevel,
+        pageNumber: s.originalPageNumber
       })),
       sections,
       quickTables,
       boardPearls: [
-        `Full Verbatim Source: Pages ${b.startPage}–${b.endPage} of ${totalPages} from Google Drive PDF (${fileName}).`
+        `Source File: ${sourceFileName} • Pages ${b.startPage}–${b.endPage} of ${totalPages}.`
       ],
       boardPearlsAr: [
-        `النص الحرفي الكامل للصفحات ${b.startPage}–${b.endPage} من أصل ${totalPages} صفحة من ملف ${fileName}.`
+        `المصدر الأصلي: ${sourceFileName} • الصفحات ${b.startPage}–${b.endPage} من أصل ${totalPages} صفحة.`
       ],
       keywords: [
         b.title.toLowerCase(),
         `page ${b.startPage}`,
         `page ${b.endPage}`,
-        fileName.toLowerCase()
+        sourceFileName.toLowerCase()
       ],
-      citation: `${fileName}. Verbatim Pages ${b.startPage}–${b.endPage} (Total ${totalPages} pp). Synced from Google Drive [${driveFileId}].`,
+      citation: `${sourceFileName}. Pages ${b.startPage}–${b.endPage} (Total ${totalPages} pp). Source ID: [${driveFileId}].`,
       isVerbatimSource: true
     });
   }
 
+  // Stage 8: Compute exact verification metrics without counting fake placeholder strings
+  const extractedTextPageCount = allProcessedPages.filter(
+    p => p.extractionMethod === 'native_text' && (p.extractedText || '').trim().length > 0
+  ).length;
+  const ocrPageCount = allProcessedPages.filter(
+    p => p.extractionMethod === 'ocr' && (p.ocrText || '').trim().length > 0
+  ).length;
+  const blankPageCount = allProcessedPages.filter(
+    p => p.extractionMethod === 'blank'
+  ).length;
+  const unprocessedInVisited = allProcessedPages.filter(
+    p => p.extractionMethod === 'unprocessed' || p.extractionStatus === 'needs_ocr' || p.extractionStatus === 'failed'
+  ).length;
+  const unvisitedPagesCount = Math.max(0, totalPages - allProcessedPages.length);
+  const unprocessedPageCount = unprocessedInVisited + unvisitedPagesCount;
+  const processedPageCount = extractedTextPageCount + ocrPageCount + blankPageCount;
+  const emptyTextPagesCount = unprocessedPageCount + blankPageCount;
+
+  const totalCharacters = allProcessedPages.reduce(
+    (sum, p) => sum + (p.extractedText || p.ocrText || '').length,
+    0
+  );
+
+  let processingStatus: BookProcessingStatus = 'verified_complete';
+  if (sourceType === 'embedded_synthetic') {
+    processingStatus = 'embedded_summary';
+  } else if (unprocessedPageCount > 0 || processedPageCount < totalPages) {
+    if (extractedTextPageCount + ocrPageCount === 0 && unprocessedInVisited > 0) {
+      processingStatus = 'needs_ocr';
+    } else {
+      processingStatus = 'partially_complete';
+    }
+  }
+
+  const completedAt = new Date().toISOString();
+  const resolvedDisplayTitle =
+    displayTitle || knownMapping?.title || sourceFileName.replace(/\.pdf$/i, '');
+
+  const diagnosticReport: BookImportDiagnosticReport = {
+    jobId,
+    bookId,
+    sourceFileName,
+    displayTitle: resolvedDisplayTitle,
+    sourceType,
+    driveFileId,
+    fileSize: pdfBytes.byteLength,
+    sha256,
+    originalPageCount: totalPages,
+    processedPageCount,
+    extractedTextPageCount,
+    ocrPageCount,
+    unprocessedPageCount,
+    blankPageCount,
+    chaptersSavedCount: chapters.length,
+    sectionsSavedCount: structuredSections.length,
+    tablesSavedCount: structuredTables.length,
+    warnings,
+    errors,
+    dbSaveStatus: 'saved',
+    searchIndexStatus: 'indexed',
+    finalVerificationStatus: processingStatus,
+    startedAt,
+    completedAt
+  };
+
+  await saveBookImportJob({
+    id: jobId,
+    bookId,
+    sourceFileName,
+    sourceType,
+    fileSize: pdfBytes.byteLength,
+    sha256,
+    jobStatus: processingStatus,
+    currentStage: unvisitedPagesCount > 0 ? 'paused_at_checkpoint' : 'completed',
+    lastProcessedPage: allProcessedPages[allProcessedPages.length - 1]?.pageNumber || 0,
+    originalPageCount: totalPages,
+    processedPageCount,
+    extractedTextPageCount,
+    ocrPageCount,
+    unprocessedPageCount,
+    blankPageCount,
+    sectionsSavedCount: structuredSections.length,
+    tablesSavedCount: structuredTables.length,
+    dbSaveStatus: 'saved',
+    searchIndexStatus: 'indexed',
+    finalVerificationStatus: processingStatus,
+    startedAt,
+    completedAt,
+    warnings,
+    errors,
+    retryCount: checkpoint ? 1 : 0
+  });
+
+  if (unvisitedPagesCount === 0) {
+    await clearBookBatchCheckpoint(bookId);
+  }
+
   return {
+    id: bookId,
     bookId,
     driveFileId,
-    fileName,
+    fileName: sourceFileName,
+    sourceFileName,
+    displayTitle: resolvedDisplayTitle,
     mimeType: 'application/pdf',
     fileSize: pdfBytes.byteLength,
+    originalFileSize: pdfBytes.byteLength,
+    sha256,
     totalPages,
+    originalPageCount: totalPages,
+    processedPageCount,
+    extractedTextPageCount,
+    ocrPageCount,
+    unprocessedPageCount,
+    blankPageCount,
     totalChapters: chapters.length,
     totalCharacters,
     emptyTextPagesCount,
-    sourceType: 'google_drive_pdf',
-    syncedAt: new Date().toISOString(),
+    sourceType,
+    processingStatus,
+    processingVersion: '2.0.0',
+    syncedAt: completedAt,
+    createdAt: startedAt,
+    updatedAt: completedAt,
     chapters,
-    pages: allPageRecords
+    pages: allProcessedPages,
+    structuredChapters,
+    structuredSections,
+    structuredTables,
+    diagnosticReport
   };
 }
 
-async function fetchPublicDrivePdfViaProxy(
+export async function fetchPublicDrivePdfViaProxy(
   cleanDriveId: string,
-  accessToken?: string | null
+  accessToken?: string | null,
+  limits?: DownloadLimitsOptions
 ): Promise<{ pdfBytes: ArrayBuffer; fileName: string }> {
+  const maxBytesQuery = limits?.maxFileSizeBytes ? `&maxBytes=${limits.maxFileSizeBytes}` : '';
+  const timeoutQuery = limits?.timeoutMs ? `&timeoutMs=${limits.timeoutMs}` : '';
   const proxyEndpoints = [
-    `/api/drive/fetch-pdf?fileId=${encodeURIComponent(cleanDriveId)}`,
+    `/api/drive/fetch-pdf?fileId=${encodeURIComponent(cleanDriveId)}${maxBytesQuery}${timeoutQuery}`,
     `https://ais-pre-sr6y5mqqoromsgvakmmu26-177021215798.europe-west2.run.app/api/drive/fetch-pdf?fileId=${encodeURIComponent(
       cleanDriveId
-    )}`,
+    )}${maxBytesQuery}${timeoutQuery}`,
     `https://ais-dev-sr6y5mqqoromsgvakmmu26-177021215798.europe-west2.run.app/api/drive/fetch-pdf?fileId=${encodeURIComponent(
       cleanDriveId
-    )}`
+    )}${maxBytesQuery}${timeoutQuery}`
   ];
 
   let lastError = 'Could not download PDF from Google Drive link.';
@@ -837,11 +1686,15 @@ async function fetchPublicDrivePdfViaProxy(
       if (accessToken) {
         headers.Authorization = `Bearer ${accessToken}`;
       }
-      const res = await fetch(endpoint, { headers });
-      const contentType = res.headers.get('content-type') || '';
+      const res = await fetch(endpoint, { headers, signal: limits?.signal });
+      const contentType = (res.headers.get('content-type') || '').toLowerCase();
 
       if (res.ok && contentType.includes('application/pdf')) {
-        const pdfBytes = await res.arrayBuffer();
+        const pdfBytes = await readLimitedResponseBuffer(res, limits);
+        if (!hasPdfSignature(pdfBytes)) {
+          lastError = 'Downloaded response from proxy is missing %PDF- header signature.';
+          continue;
+        }
         const rawFilename = res.headers.get('x-drive-filename');
         const fileName = rawFilename
           ? decodeURIComponent(rawFilename)
@@ -852,6 +1705,10 @@ async function fetchPublicDrivePdfViaProxy(
       if (contentType.includes('application/json')) {
         const errJson = await res.json().catch(() => ({}));
         if (errJson?.error) lastError = errJson.error;
+      } else if (contentType.includes('text/html')) {
+        lastError = `Received HTML response instead of PDF (HTTP ${res.status}).`;
+      } else if (!res.ok) {
+        lastError = `Proxy returned HTTP ${res.status}.`;
       }
     } catch (err) {
       lastError = err instanceof Error ? err.message : 'Network error';
@@ -865,9 +1722,22 @@ export async function ingestDriveFileAsFullBook(options: {
   accessToken?: string | null;
   driveFileId: string;
   targetBookId?: string;
+  batchSize?: number;
+  forceReprocess?: boolean;
+  ocrAdapter?: OcrPageAdapter;
+  downloadLimits?: DownloadLimitsOptions;
   onProgress?: (progress: BookSyncProgress) => void;
 }): Promise<SyncedFullBookRecord> {
-  const { accessToken, driveFileId, targetBookId, onProgress } = options;
+  const {
+    accessToken,
+    driveFileId,
+    targetBookId,
+    batchSize,
+    forceReprocess,
+    ocrAdapter,
+    downloadLimits,
+    onProgress
+  } = options;
   const cleanDriveId = extractGoogleDriveFileId(driveFileId) || targetBookId || 'dipiro-13th-ed';
   const matchedByDriveId = KNOWN_DRIVE_BOOK_MAPPINGS.find(m => m.defaultDriveId === cleanDriveId);
   const resolvedBookId = targetBookId || matchedByDriveId?.bookId || `drive-book-${cleanDriveId}`;
@@ -877,40 +1747,60 @@ export async function ingestDriveFileAsFullBook(options: {
     bookId: resolvedBookId,
     fileName: knownMapping?.badge || cleanDriveId,
     phase: 'connecting',
+    stageNumber: 1,
+    stageLabel: 'Registering import job',
     currentPage: 0,
     totalPages: 0,
-    message: 'Preparing full verbatim reference book & local PDF vault...'
+    processingStatus: 'downloading',
+    message: 'Connecting to Google Drive to verify and download original PDF...'
   });
 
-  // If no OAuth token is present, try direct proxy first, and automatically fall back to built-in full reference compiler
   if (!accessToken) {
     try {
-      const { pdfBytes, fileName } = await fetchPublicDrivePdfViaProxy(cleanDriveId, null);
-      const resolvedName = knownMapping ? `${knownMapping.badge}.pdf` : fileName;
+      const { pdfBytes, fileName } = await fetchPublicDrivePdfViaProxy(
+        cleanDriveId,
+        null,
+        downloadLimits
+      );
+      // Preserve actual sourceFileName separate from displayTitle
+      const sourceFileName = fileName || `${cleanDriveId}.pdf`;
+      const displayTitle = knownMapping?.title || sourceFileName.replace(/\.pdf$/i, '');
 
       const record = await parsePdfBufferToFullBookRecord({
         pdfBytes,
         bookId: resolvedBookId,
         driveFileId: cleanDriveId,
-        fileName: resolvedName,
+        fileName: sourceFileName,
+        sourceFileName,
+        displayTitle,
+        sourceType: 'google_drive_pdf',
+        batchSize,
+        forceReprocess,
+        ocrAdapter,
         onProgress
       });
 
       if (!knownMapping) {
-        record.customTitle = resolvedName.replace(/\.pdf$/i, '');
-        record.customBadge = resolvedName.replace(/\.pdf$/i, '').slice(0, 26);
+        record.customTitle = displayTitle;
+        record.customBadge = displayTitle.slice(0, 26);
       }
 
-      await saveSyncedFullBook(record, pdfBytes);
+      const savedRecord = await saveSyncedFullBook(record, pdfBytes);
       onProgress?.({
         bookId: resolvedBookId,
-        fileName: resolvedName,
+        fileName: sourceFileName,
         phase: 'completed',
-        currentPage: record.totalPages,
-        totalPages: record.totalPages,
-        message: `Completed! Indexed 100% of "${resolvedName}" (${record.totalPages} pages).`
+        stageNumber: 10,
+        stageLabel: 'Import job finished',
+        currentPage: savedRecord.processedPageCount || 0,
+        totalPages: savedRecord.totalPages,
+        processingStatus: savedRecord.processingStatus,
+        message:
+          savedRecord.processingStatus === 'verified_complete'
+            ? `Verified complete! Imported "${sourceFileName}" (${savedRecord.totalPages} pages).`
+            : `Imported "${sourceFileName}" with status: ${savedRecord.processingStatus} (${savedRecord.extractedTextPageCount} text pages, ${savedRecord.unprocessedPageCount} pages needing OCR).`
       });
-      return record;
+      return savedRecord;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown download or PDF parsing error';
       onProgress?.({
@@ -919,6 +1809,7 @@ export async function ingestDriveFileAsFullBook(options: {
         phase: 'error',
         currentPage: 0,
         totalPages: 0,
+        processingStatus: 'failed',
         message: `Google Drive import failed; no embedded substitute was used. ${message}`
       });
       throw new Error(`Google Drive import failed; no embedded substitute was used. ${message}`);
@@ -931,54 +1822,73 @@ export async function ingestDriveFileAsFullBook(options: {
     metadata = await getDriveFileMetadata(accessToken, cleanDriveId);
   } catch (error: unknown) {
     metadataError = error;
+    const errText = error instanceof Error ? error.message : '';
+    // If token is explicitly expired / 401, surface the auth error immediately if proxy also fails
     try {
-      const { pdfBytes, fileName } = await fetchPublicDrivePdfViaProxy(cleanDriveId, accessToken);
-      const resolvedName = knownMapping ? `${knownMapping.badge}.pdf` : fileName;
+      const { pdfBytes, fileName } = await fetchPublicDrivePdfViaProxy(
+        cleanDriveId,
+        accessToken,
+        downloadLimits
+      );
+      const sourceFileName = fileName || `${cleanDriveId}.pdf`;
+      const displayTitle = knownMapping?.title || sourceFileName.replace(/\.pdf$/i, '');
+
       const record = await parsePdfBufferToFullBookRecord({
         pdfBytes,
         bookId: resolvedBookId,
         driveFileId: cleanDriveId,
-        fileName: resolvedName,
+        fileName: sourceFileName,
+        sourceFileName,
+        displayTitle,
+        sourceType: 'google_drive_pdf',
+        batchSize,
+        forceReprocess,
+        ocrAdapter,
         onProgress
       });
       if (!knownMapping) {
-        record.customTitle = resolvedName.replace(/\.pdf$/i, '');
-        record.customBadge = resolvedName.replace(/\.pdf$/i, '').slice(0, 26);
+        record.customTitle = displayTitle;
+        record.customBadge = displayTitle.slice(0, 26);
       }
-      await saveSyncedFullBook(record, pdfBytes);
-      return record;
+      return await saveSyncedFullBook(record, pdfBytes);
     } catch (proxyError: unknown) {
-      const metadataMessage = metadataError instanceof Error ? metadataError.message : 'Drive metadata request failed';
-      const proxyMessage = proxyError instanceof Error ? proxyError.message : 'Unknown proxy download error';
+      const metadataMessage =
+        metadataError instanceof Error ? metadataError.message : errText || 'Drive metadata request failed';
+      const proxyMessage =
+        proxyError instanceof Error ? proxyError.message : 'Unknown proxy download error';
       onProgress?.({
         bookId: resolvedBookId,
         fileName: knownMapping?.badge || cleanDriveId,
         phase: 'error',
         currentPage: 0,
         totalPages: 0,
+        processingStatus: 'failed',
         message: `Google Drive import failed; no embedded substitute was used. Metadata: ${metadataMessage}. Proxy: ${proxyMessage}`
       });
-      throw new Error(`Google Drive import failed; no embedded substitute was used. Metadata: ${metadataMessage}. Proxy: ${proxyMessage}`);
+      throw new Error(
+        `Google Drive import failed; no embedded substitute was used. Metadata: ${metadataMessage}. Proxy: ${proxyMessage}`
+      );
     }
   }
 
-  // If the Drive ID is a folder, look inside it for PDFs or Google Docs
   if (metadata.mimeType === 'application/vnd.google-apps.folder') {
     const children = await listFolderChildFiles(accessToken, cleanDriveId);
     if (children.length === 0) {
       throw new Error(`The Google Drive folder "${metadata.name}" contains no PDF or Document files.`);
     }
-    // Sync the first matching PDF or largest PDF in the folder
     const pdfChild = children.find(c => c.mimeType === 'application/pdf') || children[0];
     return ingestDriveFileAsFullBook({
       accessToken,
       driveFileId: pdfChild.id,
       targetBookId: resolvedBookId,
+      batchSize,
+      forceReprocess,
+      ocrAdapter,
+      downloadLimits,
       onProgress
     });
   }
 
-  // If the Drive file is a Google Doc, export its full text
   if (metadata.mimeType === 'application/vnd.google-apps.document') {
     onProgress?.({
       bookId: resolvedBookId,
@@ -986,6 +1896,7 @@ export async function ingestDriveFileAsFullBook(options: {
       phase: 'downloading',
       currentPage: 1,
       totalPages: 1,
+      processingStatus: 'downloading',
       message: `Exporting full text from Google Doc "${metadata.name}"...`
     });
 
@@ -1002,15 +1913,21 @@ export async function ingestDriveFileAsFullBook(options: {
     const sections: VerbatimSection[] = chunks.map((chunkText, idx) => ({
       id: `${chId}-page-${idx + 1}`,
       number: `p.${idx + 1}`,
-      heading: `Page ${idx + 1} — ${ detectPageHeading(chunkText, idx + 1) }`,
+      heading: `Page ${idx + 1} — ${detectPageHeading(chunkText, idx + 1)}`,
       headingAr: `الصفحة ${idx + 1} من المستند (${metadata.name})`,
-      body: chunkText
+      body: chunkText,
+      originalPageNumber: idx + 1,
+      extractionMethod: 'native_text',
+      extractionStatus: 'extracted'
     }));
 
     const chapter: VerbatimChapter = {
       id: chId,
       bookId: resolvedBookId,
       chapterNumber: 1,
+      startPage: 1,
+      endPage: totalPages,
+      hierarchyLevel: 1,
       title: metadata.name,
       titleAr: `النص الكامل للمستند: ${metadata.name}`,
       authors: 'Google Drive Document',
@@ -1020,7 +1937,7 @@ export async function ingestDriveFileAsFullBook(options: {
       systemCategoryAr: 'المراجع السريرية الشاملة',
       sourceUrl: `local://ref/chapter/${chId}`,
       learningObjectives: [`Complete verbatim text of ${metadata.name}`],
-      toc: sections.map(s => ({ id: s.id, number: s.number, title: s.heading })),
+      toc: sections.map(s => ({ id: s.id, number: s.number, title: s.heading, pageNumber: s.originalPageNumber })),
       sections,
       quickTables: [],
       boardPearls: [`Full verbatim document imported from Google Drive (${metadata.name}).`],
@@ -1030,22 +1947,42 @@ export async function ingestDriveFileAsFullBook(options: {
       isVerbatimSource: true
     };
 
+    const docBytes = new TextEncoder().encode(fullText).buffer as ArrayBuffer;
+    const sha256 = await computeSha256Hex(docBytes);
+
     const record: SyncedFullBookRecord = {
       bookId: resolvedBookId,
       driveFileId: cleanDriveId,
       fileName: metadata.name,
+      sourceFileName: metadata.name,
+      displayTitle: metadata.name,
       mimeType: metadata.mimeType,
       fileSize: fullText.length,
+      originalFileSize: fullText.length,
+      sha256,
       totalPages,
+      originalPageCount: totalPages,
+      processedPageCount: totalPages,
+      extractedTextPageCount: totalPages,
+      ocrPageCount: 0,
+      unprocessedPageCount: 0,
+      blankPageCount: 0,
       totalChapters: 1,
       totalCharacters: fullText.length,
+      emptyTextPagesCount: 0,
+      sourceType: 'google_drive_pdf',
+      processingStatus: 'verified_complete',
       syncedAt: new Date().toISOString(),
       customTitle: metadata.name,
       customBadge: metadata.name.slice(0, 24),
       chapters: [chapter],
       pages: chunks.map((t, idx) => ({
         pageNumber: idx + 1,
+        originalPageNumber: idx + 1,
         text: t,
+        extractedText: t,
+        extractionMethod: 'native_text',
+        extractionStatus: 'extracted',
         chapterId: chId,
         chapterTitle: metadata.name,
         sectionId: `${chId}-page-${idx + 1}`,
@@ -1053,28 +1990,32 @@ export async function ingestDriveFileAsFullBook(options: {
       }))
     };
 
-    await saveSyncedFullBook(record);
+    const saved = await saveSyncedFullBook(record);
     onProgress?.({
       bookId: resolvedBookId,
       fileName: metadata.name,
       phase: 'completed',
       currentPage: totalPages,
       totalPages,
+      processingStatus: 'verified_complete',
       message: `Successfully indexed all ${totalPages} pages of "${metadata.name}".`
     });
-    return record;
+    return saved;
   }
 
-  // Standard PDF Download & 100%-Page Verbatim Extraction
   onProgress?.({
     bookId: resolvedBookId,
     fileName: metadata.name,
     phase: 'downloading',
+    stageNumber: 2,
+    stageLabel: 'Downloading PDF binary',
     currentPage: 0,
     totalPages: 0,
+    processingStatus: 'downloading',
     message: `Downloading "${metadata.name}" from Google Drive...`
   });
 
+  const expectedSize = metadata.size ? Number(metadata.size) : undefined;
   const pdfBytes = await downloadDriveFileBuffer(
     accessToken,
     cleanDriveId,
@@ -1085,102 +2026,149 @@ export async function ingestDriveFileAsFullBook(options: {
         bookId: resolvedBookId,
         fileName: metadata.name,
         phase: 'downloading',
+        stageNumber: 2,
+        stageLabel: 'Downloading PDF binary',
         currentPage: 0,
         totalPages: 0,
         downloadedBytes: loaded,
         totalBytes: total,
+        processingStatus: 'downloading',
         message: `Downloading "${metadata.name}" (${mbLoaded} MB / ${mbTotal} MB)...`
       });
+    },
+    {
+      ...downloadLimits,
+      expectedFileSize: expectedSize
     }
   );
 
+  const displayTitle = knownMapping?.title || metadata.name.replace(/\.pdf$/i, '');
   const record = await parsePdfBufferToFullBookRecord({
     pdfBytes,
     bookId: resolvedBookId,
     driveFileId: cleanDriveId,
     fileName: metadata.name,
+    sourceFileName: metadata.name,
+    displayTitle,
+    sourceType: 'google_drive_pdf',
+    batchSize,
+    forceReprocess,
+    ocrAdapter,
     onProgress
   });
 
   if (!KNOWN_DRIVE_BOOK_MAPPINGS.some(m => m.bookId === resolvedBookId)) {
-    record.customTitle = metadata.name.replace(/\.pdf$/i, '');
-    record.customBadge = metadata.name.replace(/\.pdf$/i, '').slice(0, 26);
+    record.customTitle = displayTitle;
+    record.customBadge = displayTitle.slice(0, 26);
   }
 
   onProgress?.({
     bookId: resolvedBookId,
     fileName: metadata.name,
     phase: 'saving',
-    currentPage: record.totalPages,
+    stageNumber: 7,
+    stageLabel: 'Saving extracted records & PDF to database',
+    currentPage: record.processedPageCount || record.totalPages,
     totalPages: record.totalPages,
-    message: `Saving all ${record.totalPages} pages and ${record.totalChapters} chapters to IndexedDB...`
+    processingStatus: record.processingStatus,
+    message: `Saving ${record.processedPageCount}/${record.totalPages} pages and ${record.totalChapters} chapters to local database...`
   });
 
-  await saveSyncedFullBook(record, pdfBytes);
+  const savedRecord = await saveSyncedFullBook(record, pdfBytes);
 
   onProgress?.({
     bookId: resolvedBookId,
     fileName: metadata.name,
     phase: 'completed',
-    currentPage: record.totalPages,
-    totalPages: record.totalPages,
-    message: `Completed! Indexed 100% of "${metadata.name}" (${record.totalPages} pages, ${record.totalChapters} chapters).`
+    stageNumber: 10,
+    stageLabel: 'Completed',
+    currentPage: savedRecord.processedPageCount || savedRecord.totalPages,
+    totalPages: savedRecord.totalPages,
+    processingStatus: savedRecord.processingStatus,
+    message:
+      savedRecord.processingStatus === 'verified_complete'
+        ? `Verified complete! Indexed 100% of "${metadata.name}" (${savedRecord.totalPages} pages, ${savedRecord.totalChapters} chapters).`
+        : `Import finished with status "${savedRecord.processingStatus}": ${savedRecord.extractedTextPageCount} native text pages, ${savedRecord.ocrPageCount} OCR pages, ${savedRecord.unprocessedPageCount} pages needing OCR.`
   });
 
-  return record;
+  return savedRecord;
 }
 
 export async function ingestLocalPdfFileAsFullBook(options: {
   file: File;
   targetBookId?: string;
+  batchSize?: number;
+  forceReprocess?: boolean;
+  ocrAdapter?: OcrPageAdapter;
   onProgress?: (progress: BookSyncProgress) => void;
 }): Promise<SyncedFullBookRecord> {
-  const { file, targetBookId, onProgress } = options;
+  const { file, targetBookId, batchSize, forceReprocess, ocrAdapter, onProgress } = options;
   const resolvedBookId =
     targetBookId || `local-pdf-${file.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 32)}`;
+  const knownMapping = KNOWN_DRIVE_BOOK_MAPPINGS.find(m => m.bookId === resolvedBookId);
 
   onProgress?.({
     bookId: resolvedBookId,
     fileName: file.name,
     phase: 'downloading',
+    stageNumber: 2,
+    stageLabel: 'Reading local PDF file',
     currentPage: 0,
     totalPages: 0,
+    processingStatus: 'downloading',
     message: `Reading local PDF "${file.name}"...`
   });
 
   const pdfBytes = await file.arrayBuffer();
+  const displayTitle = knownMapping?.title || file.name.replace(/\.pdf$/i, '');
+
   const record = await parsePdfBufferToFullBookRecord({
     pdfBytes,
     bookId: resolvedBookId,
     driveFileId: `local:${file.name}`,
     fileName: file.name,
+    sourceFileName: file.name,
+    displayTitle,
+    sourceType: 'local_file_pdf',
+    batchSize,
+    forceReprocess,
+    ocrAdapter,
     onProgress
   });
 
-  if (!KNOWN_DRIVE_BOOK_MAPPINGS.some(m => m.bookId === resolvedBookId)) {
-    record.customTitle = file.name.replace(/\.pdf$/i, '');
-    record.customBadge = file.name.replace(/\.pdf$/i, '').slice(0, 26);
+  if (!knownMapping) {
+    record.customTitle = displayTitle;
+    record.customBadge = displayTitle.slice(0, 26);
   }
 
   onProgress?.({
     bookId: resolvedBookId,
     fileName: file.name,
     phase: 'saving',
-    currentPage: record.totalPages,
+    stageNumber: 7,
+    stageLabel: 'Saving to database',
+    currentPage: record.processedPageCount || record.totalPages,
     totalPages: record.totalPages,
-    message: `Saving ${record.totalPages} pages to IndexedDB...`
+    processingStatus: record.processingStatus,
+    message: `Saving ${record.processedPageCount}/${record.totalPages} pages to IndexedDB...`
   });
 
-  await saveSyncedFullBook(record, pdfBytes);
+  const savedRecord = await saveSyncedFullBook(record, pdfBytes);
 
   onProgress?.({
     bookId: resolvedBookId,
     fileName: file.name,
     phase: 'completed',
-    currentPage: record.totalPages,
-    totalPages: record.totalPages,
-    message: `Completed! Indexed 100% of "${file.name}" (${record.totalPages} pages).`
+    stageNumber: 10,
+    stageLabel: 'Completed',
+    currentPage: savedRecord.processedPageCount || savedRecord.totalPages,
+    totalPages: savedRecord.totalPages,
+    processingStatus: savedRecord.processingStatus,
+    message:
+      savedRecord.processingStatus === 'verified_complete'
+        ? `Verified complete! Indexed 100% of "${file.name}" (${savedRecord.totalPages} pages).`
+        : `Import finished with status "${savedRecord.processingStatus}" (${savedRecord.extractedTextPageCount} text pages, ${savedRecord.unprocessedPageCount} pages needing OCR).`
   });
 
-  return record;
+  return savedRecord;
 }

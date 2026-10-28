@@ -7,13 +7,38 @@ import {
   getSyncedPdfBytes,
   saveSyncedFullBook
 } from './fullBookIdb';
-import { KNOWN_DRIVE_BOOK_MAPPINGS, BookSyncProgress } from './fullBookEngine';
+import { KNOWN_DRIVE_BOOK_MAPPINGS, BookSyncProgress, computeContentHash } from './fullBookEngine';
 
 /**
- * Escapes ASCII text for PDF literal strings `( ... )`.
+ * Transliterates common medical/mathematical Unicode symbols for WinAnsi PDF literal strings
+ * so clinical operators (>=, <=, +/-, mcg, alpha, beta) are never lost in PDF stream rendering.
  */
-function escapePdfText(raw: string): string {
+function normalizeForPdfWinAnsi(raw: string): string {
   return raw
+    .replace(/≥/g, '>=')
+    .replace(/≤/g, '<=')
+    .replace(/±/g, '+/-')
+    .replace(/×/g, 'x')
+    .replace(/÷/g, '/')
+    .replace(/→/g, '->')
+    .replace(/←/g, '<-')
+    .replace(/↔/g, '<->')
+    .replace(/↑/g, '^')
+    .replace(/↓/g, 'v')
+    .replace(/μ/g, 'mc')
+    .replace(/µ/g, 'mc')
+    .replace(/α/g, 'alpha')
+    .replace(/β/g, 'beta')
+    .replace(/γ/g, 'gamma')
+    .replace(/Δ/g, 'Delta')
+    .replace(/[•·]/g, '*')
+    .replace(/[–—]/g, '-')
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'");
+}
+
+function escapePdfText(raw: string): string {
+  return normalizeForPdfWinAnsi(raw)
     .replace(/[^\x20-\x7E]/g, ' ')
     .replace(/\\/g, '\\\\')
     .replace(/\(/g, '\\(')
@@ -21,10 +46,11 @@ function escapePdfText(raw: string): string {
 }
 
 /**
- * Wraps long text into lines of at most `maxChars` characters for clean PDF page rendering.
+ * Wraps long text into lines of at most `maxChars` characters for clean PDF page rendering
+ * without dropping any lines.
  */
-function wrapTextLines(text: string, maxChars: number = 88): string[] {
-  const paragraphs = text.split('\n');
+export function wrapTextLines(text: string, maxChars: number = 88): string[] {
+  const paragraphs = normalizeForPdfWinAnsi(text).split('\n');
   const wrapped: string[] = [];
 
   for (const para of paragraphs) {
@@ -53,7 +79,7 @@ function wrapTextLines(text: string, maxChars: number = 88): string[] {
 /**
  * Synthesizes a valid, standard-compliant multi-page PDF-1.4 binary (`ArrayBuffer`)
  * from an array of structured page records.
- * Compatible with pdfjs-dist, Chrome PDF Viewer, Adobe Acrobat, and Android PDF Viewers.
+ * Long pages are automatically paginated across continuation sheets so ZERO lines are truncated.
  */
 export function synthesizeValidMultiPagePdfBuffer(
   bookTitle: string,
@@ -65,7 +91,7 @@ export function synthesizeValidMultiPagePdfBuffer(
     text: string;
   }[]
 ): ArrayBuffer {
-  const safePages =
+  const rawInputPages =
     pages.length > 0
       ? pages
       : [
@@ -77,18 +103,43 @@ export function synthesizeValidMultiPagePdfBuffer(
           }
         ];
 
-  // Object IDs:
-  // 1: Catalog
-  // 2: Pages Tree
-  // 3: Font F1 (Helvetica)
-  // 4: Font F2 (Helvetica-Bold)
-  // For each page i (0..N-1):
-  //   pageObjId = 5 + i * 2
-  //   contentObjId = 6 + i * 2
+  const MAX_LINES_PER_SHEET = 46;
+  const paginatedSheets: {
+    pageNumber: number;
+    chapterTitle: string;
+    sectionHeading: string;
+    lines: string[];
+  }[] = [];
+
+  for (const p of rawInputPages) {
+    const allLines = wrapTextLines(p.text, 88);
+    if (allLines.length <= MAX_LINES_PER_SHEET) {
+      paginatedSheets.push({
+        pageNumber: paginatedSheets.length + 1,
+        chapterTitle: p.chapterTitle,
+        sectionHeading: p.sectionHeading,
+        lines: allLines
+      });
+    } else {
+      let part = 1;
+      for (let offset = 0; offset < allLines.length; offset += MAX_LINES_PER_SHEET) {
+        const chunkLines = allLines.slice(offset, offset + MAX_LINES_PER_SHEET);
+        paginatedSheets.push({
+          pageNumber: paginatedSheets.length + 1,
+          chapterTitle: p.chapterTitle,
+          sectionHeading:
+            part === 1 ? p.sectionHeading : `${p.sectionHeading} (Cont. Part ${part})`,
+          lines: chunkLines
+        });
+        part++;
+      }
+    }
+  }
+
   const objects: string[] = [];
   const pageObjIds: number[] = [];
 
-  for (let i = 0; i < safePages.length; i++) {
+  for (let i = 0; i < paginatedSheets.length; i++) {
     pageObjIds.push(5 + i * 2);
   }
 
@@ -98,7 +149,7 @@ export function synthesizeValidMultiPagePdfBuffer(
   // Object 2: Pages
   const kidsRefs = pageObjIds.map(id => `${id} 0 R`).join(' ');
   objects.push(
-    `2 0 obj\n<< /Type /Pages /Kids [ ${kidsRefs} ] /Count ${safePages.length} >>\nendobj\n`
+    `2 0 obj\n<< /Type /Pages /Kids [ ${kidsRefs} ] /Count ${paginatedSheets.length} >>\nendobj\n`
   );
 
   // Object 3: Helvetica
@@ -111,13 +162,11 @@ export function synthesizeValidMultiPagePdfBuffer(
     `4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>\nendobj\n`
   );
 
-  // Page and Content Stream Objects
-  for (let i = 0; i < safePages.length; i++) {
-    const p = safePages[i];
+  for (let i = 0; i < paginatedSheets.length; i++) {
+    const p = paginatedSheets[i];
     const pageObjId = 5 + i * 2;
     const contentObjId = 6 + i * 2;
 
-    const bodyLines = wrapTextLines(p.text, 88).slice(0, 48);
     const streamCommands: string[] = [];
 
     // Header Banner Bar
@@ -130,7 +179,7 @@ export function synthesizeValidMultiPagePdfBuffer(
     streamCommands.push('1 1 1 rg');
     streamCommands.push('/F2 9 Tf');
     streamCommands.push(
-      `44 752 Td (${escapePdfText(bookTitle.slice(0, 72))} | Page ${p.pageNumber} of ${safePages.length}) Tj`
+      `44 752 Td (${escapePdfText(bookTitle.slice(0, 62))} | Embedded Summary Page ${p.pageNumber} of ${paginatedSheets.length}) Tj`
     );
     streamCommands.push('ET');
 
@@ -156,7 +205,7 @@ export function synthesizeValidMultiPagePdfBuffer(
     streamCommands.push('12.5 TL');
     streamCommands.push('36 680 Td');
 
-    for (const line of bodyLines) {
+    for (const line of p.lines) {
       if (!line) {
         streamCommands.push('T*');
       } else {
@@ -170,9 +219,9 @@ export function synthesizeValidMultiPagePdfBuffer(
     streamCommands.push('0.45 0.50 0.58 rg');
     streamCommands.push('/F1 8 Tf');
     streamCommands.push(
-      `36 28 Td (ClinPharm Hospital Built-in Offline Reference Vault | ${escapePdfText(
-        edition.slice(0, 55)
-      )} | Verbatim Page ${p.pageNumber}/${safePages.length}) Tj`
+      `36 28 Td (ClinPharm Built-in Offline Summary [NOT Original PDF] | ${escapePdfText(
+        edition.slice(0, 48)
+      )} | Page ${p.pageNumber}/${paginatedSheets.length}) Tj`
     );
     streamCommands.push('ET');
 
@@ -186,9 +235,8 @@ export function synthesizeValidMultiPagePdfBuffer(
     );
   }
 
-  // Assemble full PDF with exact byte offsets in xref table
   let pdfString = '%PDF-1.4\n%\xE2\xE3\xCF\xD3\n';
-  const offsets: number[] = [0]; // index 0 is free object
+  const offsets: number[] = [0];
 
   for (const objStr of objects) {
     offsets.push(pdfString.length);
@@ -215,8 +263,8 @@ export function synthesizeValidMultiPagePdfBuffer(
 }
 
 /**
- * Compiles any built-in VerbatimBook (or bookId) into a complete SyncedFullBookRecord
- * and valid multi-page binary PDF (`ArrayBuffer`) without requiring any external network access.
+ * Compiles a built-in VerbatimBook into an explicit `embedded_synthetic` summary record
+ * (`processingStatus: 'embedded_summary'`). Must NEVER be represented as an imported original PDF.
  */
 export function compileEmbeddedBookToFullRecord(
   bookIdOrDriveId: string
@@ -241,7 +289,6 @@ export function compileEmbeddedBookToFullRecord(
   let totalCharacters = 0;
 
   for (const ch of baseBook.chapters) {
-    // 1. Chapter Overview & Board Pearls Page
     const pearlsBlock = [
       `CHAPTER ${ch.chapterNumber}: ${ch.title}`,
       `Authors: ${ch.authors} | Edition: ${ch.edition} | Reference Pages: ${ch.pageRange}`,
@@ -258,8 +305,15 @@ export function compileEmbeddedBookToFullRecord(
     const firstSecId = ch.sections[0]?.id || `${ch.id}-overview`;
 
     pages.push({
+      id: `${baseBook.id}-page-${pageCursor}`,
+      bookId: baseBook.id,
       pageNumber: pageCursor,
+      originalPageNumber: pageCursor,
       text: pearlsBlock,
+      extractedText: pearlsBlock,
+      extractionMethod: 'native_text',
+      extractionStatus: 'extracted',
+      contentHash: computeContentHash(pearlsBlock),
       chapterId: ch.id,
       chapterTitle: ch.title,
       sectionId: firstSecId,
@@ -273,7 +327,6 @@ export function compileEmbeddedBookToFullRecord(
     });
     pageCursor++;
 
-    // 2. Every Verbatim Section Page
     for (const sec of ch.sections) {
       let secText = `${sec.number} ${sec.heading}\n`;
       if (sec.evidenceGrade) {
@@ -293,8 +346,15 @@ export function compileEmbeddedBookToFullRecord(
 
       totalCharacters += secText.length;
       pages.push({
+        id: `${baseBook.id}-page-${pageCursor}`,
+        bookId: baseBook.id,
         pageNumber: pageCursor,
+        originalPageNumber: pageCursor,
         text: secText,
+        extractedText: secText,
+        extractionMethod: 'native_text',
+        extractionStatus: 'extracted',
+        contentHash: computeContentHash(secText),
         chapterId: ch.id,
         chapterTitle: ch.title,
         sectionId: sec.id,
@@ -309,7 +369,6 @@ export function compileEmbeddedBookToFullRecord(
       pageCursor++;
     }
 
-    // 3. Chapter Quick Reference Tables Page (if present)
     if (ch.quickTables && ch.quickTables.length > 0) {
       const tablesText = ch.quickTables
         .map(
@@ -321,8 +380,15 @@ export function compileEmbeddedBookToFullRecord(
 
       totalCharacters += tablesText.length;
       pages.push({
+        id: `${baseBook.id}-page-${pageCursor}`,
+        bookId: baseBook.id,
         pageNumber: pageCursor,
+        originalPageNumber: pageCursor,
         text: tablesText,
+        extractedText: tablesText,
+        extractionMethod: 'native_text',
+        extractionStatus: 'extracted',
+        contentHash: computeContentHash(tablesText),
         chapterId: ch.id,
         chapterTitle: ch.title,
         sectionId: ch.sections[ch.sections.length - 1]?.id || firstSecId,
@@ -344,20 +410,36 @@ export function compileEmbeddedBookToFullRecord(
     pdfRenderPages
   );
 
-  const safeFileName = `${mapping.badge.replace(/[^a-zA-Z0-9_-]+/g, '_')}_Full_Verbatim_Reference.pdf`;
+  const safeFileName = `${mapping.badge.replace(/[^a-zA-Z0-9_-]+/g, '_')}_Embedded_Summary.pdf`;
+  const nowIso = new Date().toISOString();
 
   const record: SyncedFullBookRecord = {
+    id: baseBook.id,
     bookId: baseBook.id,
-    driveFileId: mapping.defaultDriveId || `builtin-${baseBook.id}`,
+    driveFileId: `builtin-${baseBook.id}`,
     fileName: safeFileName,
+    sourceFileName: safeFileName,
+    displayTitle: `${baseBook.title} (Embedded Offline Summary)`,
     mimeType: 'application/pdf',
     fileSize: pdfBytes.byteLength,
+    originalFileSize: pdfBytes.byteLength,
+    sha256: `embedded-summary-${baseBook.id}`,
     totalPages: pages.length,
+    originalPageCount: pages.length,
+    processedPageCount: pages.length,
+    extractedTextPageCount: pages.length,
+    ocrPageCount: 0,
+    unprocessedPageCount: 0,
+    blankPageCount: 0,
     totalChapters: baseBook.chapters.length,
     totalCharacters,
     emptyTextPagesCount: 0,
     sourceType: 'embedded_synthetic',
-    syncedAt: new Date().toISOString(),
+    processingStatus: 'embedded_summary',
+    processingVersion: '2.0.0',
+    syncedAt: nowIso,
+    createdAt: nowIso,
+    updatedAt: nowIso,
     chapters: baseBook.chapters as VerbatimChapter[],
     pages
   };
@@ -366,12 +448,20 @@ export function compileEmbeddedBookToFullRecord(
 }
 
 /**
- * Ensures a single book is compiled and stored in IndexedDB with its binary PDF.
+ * Seeds a built-in embedded summary ONLY if a real imported PDF does not already exist for this bookId.
  */
 export async function seedSingleEmbeddedBookOffline(
   bookId: string,
   onProgress?: (progress: BookSyncProgress) => void
 ): Promise<SyncedFullBookRecord> {
+  const existing = getSyncedFullBookByIdSync(bookId);
+  if (
+    existing &&
+    (existing.sourceType === 'google_drive_pdf' || existing.sourceType === 'local_file_pdf')
+  ) {
+    return existing;
+  }
+
   const { record, pdfBytes } = compileEmbeddedBookToFullRecord(bookId);
 
   onProgress?.({
@@ -380,29 +470,30 @@ export async function seedSingleEmbeddedBookOffline(
     phase: 'indexing',
     currentPage: record.totalPages,
     totalPages: record.totalPages,
-    message: `Indexing embedded offline summary (not the original PDF) "${record.fileName}" (${record.totalPages} pages, ${record.totalChapters} chapters)...`
+    processingStatus: 'embedded_summary',
+    message: `Preparing embedded offline summary (not the original PDF) "${record.fileName}" (${record.totalPages} pages)...`
   });
 
-  await saveSyncedFullBook(record, pdfBytes);
+  const saved = await saveSyncedFullBook(record, pdfBytes);
 
   onProgress?.({
-    bookId: record.bookId,
-    fileName: record.fileName,
+    bookId: saved.bookId,
+    fileName: saved.fileName,
     phase: 'completed',
-    currentPage: record.totalPages,
-    totalPages: record.totalPages,
-    message: `Completed! Embedded offline summary (not the original PDF) "${record.fileName}" (${record.totalPages} pages) is active in local IndexedDB storage.`
+    currentPage: saved.totalPages,
+    totalPages: saved.totalPages,
+    processingStatus: 'embedded_summary',
+    message: `Embedded offline summary (not the original PDF) "${saved.fileName}" is stored separately from original PDF imports.`
   });
 
-  return record;
+  return saved;
 }
 
 /**
- * Automatically pre-loads embedded offline summaries for the 7 reference titles into IndexedDB
- * if they are not already present, These are not the original publisher PDFs and must not be represented as full-book imports.
+ * Optional helper to seed embedded summaries without ever overwriting real imported PDFs.
  */
 export async function ensureAllCoreBooksPreloadedOffline(
-  forceRebuildAll: boolean = false,
+  forceRebuildSummaries: boolean = false,
   onProgress?: (progress: BookSyncProgress) => void
 ): Promise<SyncedFullBookRecord[]> {
   const results: SyncedFullBookRecord[] = [];
@@ -411,7 +502,17 @@ export async function ensureAllCoreBooksPreloadedOffline(
     const existingRecord = getSyncedFullBookByIdSync(mapping.bookId);
     const existingBytes = await getSyncedPdfBytes(mapping.bookId);
 
-    if (!forceRebuildAll && existingRecord && existingBytes && existingBytes.byteLength > 0) {
+    // Never overwrite a real imported PDF
+    if (
+      existingRecord &&
+      (existingRecord.sourceType === 'google_drive_pdf' ||
+        existingRecord.sourceType === 'local_file_pdf')
+    ) {
+      results.push(existingRecord);
+      continue;
+    }
+
+    if (!forceRebuildSummaries && existingRecord && existingBytes && existingBytes.byteLength > 0) {
       results.push(existingRecord);
       continue;
     }

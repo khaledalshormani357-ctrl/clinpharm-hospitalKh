@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import crypto from 'crypto';
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -24,6 +25,68 @@ interface CopilotChatRequestBody {
   verbatimLibraryContext?: string;
 }
 
+async function readLimitedBuffer(
+  response: Response,
+  options: { maxBytes?: number; timeoutMs?: number } = {}
+): Promise<Buffer> {
+  const maxBytes = options.maxBytes ?? 250 * 1024 * 1024; // 250 MB default
+  const timeoutMs = options.timeoutMs ?? 120_000; // 120s default
+
+  const contentLengthHeader = Number(response.headers.get('content-length') || 0);
+  if (contentLengthHeader > maxBytes) {
+    throw new Error(
+      `PDF file size (${contentLengthHeader} bytes) exceeds maximum allowed limit (${maxBytes} bytes).`
+    );
+  }
+
+  if (!response.body) {
+    const ab = await response.arrayBuffer();
+    if (ab.byteLength > maxBytes) {
+      throw new Error(`Downloaded payload (${ab.byteLength} bytes) exceeds maximum limit (${maxBytes} bytes).`);
+    }
+    return Buffer.from(ab);
+  }
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  const startedAt = Date.now();
+
+  while (true) {
+    if (Date.now() - startedAt > timeoutMs) {
+      await reader.cancel().catch(() => {});
+      throw new Error(`Download timed out after ${timeoutMs}ms.`);
+    }
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) {
+      totalBytes += value.byteLength;
+      if (totalBytes > maxBytes) {
+        await reader.cancel().catch(() => {});
+        throw new Error(`Streamed payload (${totalBytes} bytes) exceeds maximum limit (${maxBytes} bytes).`);
+      }
+      chunks.push(value);
+    }
+  }
+
+  return Buffer.concat(chunks.map(c => Buffer.from(c)));
+}
+
+function extractForwardCookies(headers: Headers): string {
+  const getSetCookie = (headers as unknown as { getSetCookie?: () => string[] }).getSetCookie;
+  const rawCookies: string[] =
+    typeof getSetCookie === 'function'
+      ? getSetCookie.call(headers)
+      : headers.get('set-cookie')
+      ? [headers.get('set-cookie') as string]
+      : [];
+
+  return rawCookies
+    .map(c => c.split(';')[0]?.trim())
+    .filter(Boolean)
+    .join('; ');
+}
+
 async function startServer() {
   const app = express();
 
@@ -32,7 +95,10 @@ async function startServer() {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    res.setHeader('Access-Control-Expose-Headers', 'X-Drive-Filename, Content-Length');
+    res.setHeader(
+      'Access-Control-Expose-Headers',
+      'X-Drive-Filename, X-File-Sha256, Content-Length'
+    );
     if (req.method === 'OPTIONS') {
       res.status(204).end();
       return;
@@ -40,7 +106,7 @@ async function startServer() {
     next();
   });
 
-  app.use(express.json({ limit: '6mb' }));
+  app.use(express.json({ limit: '12mb' }));
 
   app.get('/api/copilot/health', (_req, res) => {
     const hasKey = Boolean(process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY);
@@ -254,7 +320,76 @@ ${verbatimLibraryContext || 'All 7 reference books (47 chapters) indexed.'}`;
     }
   });
 
-  // Direct Google Drive Public / Shared Link PDF Proxy (allows importing shared Drive PDFs without OAuth popup)
+  // Authorized OCR endpoint for scanned PDF pages (only returns OCR text when Gemini Vision OCR succeeds)
+  app.post('/api/books/ocr-page', async (req, res) => {
+    try {
+      const { imageBase64, mimeType = 'image/png', pageNumber = 1 } = (req.body || {}) as {
+        imageBase64?: string;
+        mimeType?: string;
+        pageNumber?: number;
+      };
+
+      if (!imageBase64 || typeof imageBase64 !== 'string') {
+        res.status(400).json({ ok: false, error: 'imageBase64 is required for page OCR.' });
+        return;
+      }
+
+      const apiKey = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
+      if (!apiKey) {
+        res.status(503).json({
+          ok: false,
+          code: 'OCR_PROVIDER_NOT_CONFIGURED',
+          error: 'No server OCR credentials configured; page remains marked as needs_ocr.'
+        });
+        return;
+      }
+
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
+      });
+
+      const cleanBase64 = imageBase64.replace(/^data:[^;]+;base64,/, '');
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              {
+                inlineData: {
+                  mimeType,
+                  data: cleanBase64
+                }
+              },
+              {
+                text: `Perform strict verbatim OCR on this medical reference book page (Page ${pageNumber}). Preserve exact reading order, all clinical numbers, dosing units, symbols (≥, ≤, μg, mEq, α, β), Arabic and English text, and table rows separated by triple spaces. Do NOT summarize or invent any text. If the page is completely blank, return an empty string.`
+              }
+            ]
+          }
+        ],
+        config: {
+          temperature: 0
+        }
+      });
+
+      const ocrText = (response.text || '').trim();
+      res.json({
+        ok: true,
+        ocrText,
+        confidence: ocrText.length > 0 ? 0.92 : 0,
+        method: 'gemini_vision_ocr'
+      });
+    } catch (error: unknown) {
+      res.status(500).json({
+        ok: false,
+        code: 'OCR_EXECUTION_ERROR',
+        error: error instanceof Error ? error.message : 'OCR execution failed'
+      });
+    }
+  });
+
+  // Direct Google Drive Authorized / Shared Link PDF Proxy with cookie-preserving confirmation & size limits
   app.get('/api/drive/fetch-pdf', async (req, res) => {
     try {
       const fileId = String(req.query.fileId || '').trim();
@@ -262,6 +397,15 @@ ${verbatimLibraryContext || 'All 7 reference books (47 chapters) indexed.'}`;
         res.status(400).json({ error: 'Valid Google Drive fileId is required.' });
         return;
       }
+
+      const maxBytesParam = Number(req.query.maxBytes || 0);
+      const maxBytes =
+        maxBytesParam > 0 && maxBytesParam <= 500 * 1024 * 1024
+          ? maxBytesParam
+          : 250 * 1024 * 1024;
+      const timeoutMsParam = Number(req.query.timeoutMs || 0);
+      const timeoutMs =
+        timeoutMsParam >= 5_000 && timeoutMsParam <= 300_000 ? timeoutMsParam : 120_000;
 
       const authHeader = req.headers.authorization;
       const candidateUrls = [
@@ -274,6 +418,10 @@ ${verbatimLibraryContext || 'All 7 reference books (47 chapters) indexed.'}`;
           `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`
         );
       }
+
+      let lastDiagnosticError =
+        'Could not download PDF directly. Ensure the Google Drive file sharing is set to "Anyone with the link" or sign in with Google.';
+      let sawAuthFailure = false;
 
       for (const url of candidateUrls) {
         try {
@@ -290,59 +438,117 @@ ${verbatimLibraryContext || 'All 7 reference books (47 chapters) indexed.'}`;
             redirect: 'follow'
           });
 
-          if (!upstream.ok) continue;
+          if (upstream.status === 401 || upstream.status === 403) {
+            sawAuthFailure = true;
+            lastDiagnosticError = `Google Drive returned HTTP ${upstream.status} (authentication required or permission denied).`;
+            continue;
+          }
+
+          if (!upstream.ok) {
+            lastDiagnosticError = `Google Drive upstream returned HTTP ${upstream.status}.`;
+            continue;
+          }
 
           const contentType = upstream.headers.get('content-type') || '';
-          const arrayBuf = await upstream.arrayBuffer();
-          const buf = Buffer.from(arrayBuf);
+          const buf = await readLimitedBuffer(upstream, { maxBytes, timeoutMs });
 
-          // Check if buffer starts with %PDF-
+          // Verify %PDF- magic header
           if (buf.length > 5 && buf.subarray(0, 5).toString('ascii') === '%PDF-') {
             const disposition = upstream.headers.get('content-disposition') || '';
             const filenameMatch = disposition.match(/filename\*?=(?:UTF-8'')?["']?([^"';\n]+)["']?/i);
             const filename = filenameMatch?.[1]
               ? decodeURIComponent(filenameMatch[1])
               : `${fileId}.pdf`;
+            const sha256 = crypto.createHash('sha256').update(buf).digest('hex');
 
             res.setHeader('Content-Type', 'application/pdf');
             res.setHeader('Content-Length', String(buf.length));
             res.setHeader('X-Drive-Filename', encodeURIComponent(filename));
+            res.setHeader('X-File-Sha256', sha256);
             res.send(buf);
             return;
           }
 
-          // If HTML confirmation page was returned, extract confirm UUID if present
+          // If HTML page was returned, check if it is a login wall vs a virus-scan confirmation page
           if (contentType.includes('text/html')) {
             const html = buf.toString('utf8');
+            if (
+              html.includes('accounts.google.com/v3/signin') ||
+              html.includes('ServiceLogin') ||
+              upstream.url.includes('accounts.google.com')
+            ) {
+              sawAuthFailure = true;
+              lastDiagnosticError =
+                'Google Drive file requires sign-in or authorized access (received Google sign-in page instead of PDF).';
+              continue;
+            }
+
+            const forwardCookie = extractForwardCookies(upstream.headers);
             const uuidMatch = html.match(/name="uuid"\s+value="([^"]+)"/i);
-            if (uuidMatch?.[1]) {
-              const confirmUrl = `https://drive.usercontent.google.com/download?id=${encodeURIComponent(
-                fileId
-              )}&export=download&confirm=t&uuid=${encodeURIComponent(uuidMatch[1])}`;
-              const confirmedUpstream = await fetch(confirmUrl, { headers, redirect: 'follow' });
+            const confirmMatch = html.match(/name="confirm"\s+value="([^"]+)"/i);
+            const actionMatch = html.match(/<form[^>]+id="download-form"[^>]+action="([^"]+)"/i);
+
+            if (uuidMatch?.[1] || actionMatch?.[1]) {
+              const confirmToken = confirmMatch?.[1] || 't';
+              const uuidParam = uuidMatch?.[1]
+                ? `&uuid=${encodeURIComponent(uuidMatch[1])}`
+                : '';
+              const baseAction = actionMatch?.[1]
+                ? actionMatch[1].replace(/&amp;/g, '&')
+                : 'https://drive.usercontent.google.com/download';
+              const confirmUrl = baseAction.includes('?')
+                ? `${baseAction}&id=${encodeURIComponent(fileId)}&export=download&confirm=${encodeURIComponent(confirmToken)}${uuidParam}`
+                : `${baseAction}?id=${encodeURIComponent(fileId)}&export=download&confirm=${encodeURIComponent(confirmToken)}${uuidParam}`;
+
+              const confirmHeaders: Record<string, string> = { ...headers };
+              if (forwardCookie) {
+                confirmHeaders.Cookie = forwardCookie;
+              }
+
+              const confirmedUpstream = await fetch(confirmUrl, {
+                headers: confirmHeaders,
+                redirect: 'follow'
+              });
+
               if (confirmedUpstream.ok) {
-                const confirmedBuf = Buffer.from(await confirmedUpstream.arrayBuffer());
+                const confirmedBuf = await readLimitedBuffer(confirmedUpstream, {
+                  maxBytes,
+                  timeoutMs
+                });
                 if (
                   confirmedBuf.length > 5 &&
                   confirmedBuf.subarray(0, 5).toString('ascii') === '%PDF-'
                 ) {
+                  const disposition = confirmedUpstream.headers.get('content-disposition') || '';
+                  const filenameMatch = disposition.match(
+                    /filename\*?=(?:UTF-8'')?["']?([^"';\n]+)["']?/i
+                  );
+                  const filename = filenameMatch?.[1]
+                    ? decodeURIComponent(filenameMatch[1])
+                    : `${fileId}.pdf`;
+                  const sha256 = crypto.createHash('sha256').update(confirmedBuf).digest('hex');
+
                   res.setHeader('Content-Type', 'application/pdf');
                   res.setHeader('Content-Length', String(confirmedBuf.length));
-                  res.setHeader('X-Drive-Filename', encodeURIComponent(`${fileId}.pdf`));
+                  res.setHeader('X-Drive-Filename', encodeURIComponent(filename));
+                  res.setHeader('X-File-Sha256', sha256);
                   res.send(confirmedBuf);
                   return;
                 }
               }
             }
+
+            lastDiagnosticError =
+              'Google Drive returned an HTML page instead of a valid PDF binary (%PDF- signature missing).';
           }
-        } catch {
-          // Try next candidate URL
+        } catch (err: unknown) {
+          lastDiagnosticError =
+            err instanceof Error ? err.message : 'Upstream Google Drive download attempt failed.';
         }
       }
 
-      res.status(404).json({
-        error:
-          'Could not download PDF directly. Ensure the Google Drive file sharing is set to "Anyone with the link" or sign in with Google.'
+      res.status(sawAuthFailure ? 403 : 404).json({
+        error: lastDiagnosticError
       });
     } catch (error: unknown) {
       res.status(500).json({

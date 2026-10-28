@@ -48,7 +48,7 @@ import { printOrSaveClinicalPdf, shareClinicalFile } from '../lib/androidPermiss
 import { syncQueue } from '../lib/supabase/syncQueue';
 import { authService } from '../lib/supabase/auth';
 import { getActiveHospitalUser, subscribeHospitalUsers, HospitalUser } from '../lib/usersManager';
-import { ensureAllCoreBooksPreloadedOffline } from '../lib/googleDrive/embeddedBookCompiler';
+import { hydrateSyncedFullBooks } from '../lib/googleDrive/fullBookIdb';
 
 interface Props {
   patients: Patient[];
@@ -86,7 +86,7 @@ export function DashboardLayout({
   const [activeHospitalUser, setActiveHospitalUserState] = useState<HospitalUser>(() => getActiveHospitalUser());
 
   useEffect(() => {
-    void ensureAllCoreBooksPreloadedOffline();
+    void hydrateSyncedFullBooks();
     const unsub = subscribeHospitalUsers(() => {
       setActiveHospitalUserState(getActiveHospitalUser());
     });
