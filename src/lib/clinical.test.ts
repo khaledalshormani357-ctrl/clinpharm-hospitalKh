@@ -173,7 +173,7 @@ describe("evidence & finalization gate", () => {
   it("keeps the synthetic adult DKA benchmark aligned with the 2024 consensus thresholds", () => {
     const dka = BENCHMARK_APP_TEST_CASES.find((testCase) => testCase.id === "test-case-dka-k");
     expect(dka).toBeDefined();
-    expect(dka!.expectedAppFindingsEn.join(" ")).toContain("BG <250 mg/dL");
+    expect(dka!.expectedAppFindingsEn.join(" ")).toContain("BG falls below 250 mg/dL");
     expect(dka!.expectedAppFindingsEn.join(" ")).toContain("0.05 units/kg/h");
     expect(dka!.patientData.nameEn).toBe("Synthetic DKA Test Patient");
     expect(dka!.patientData.mrn).toBe("TEST-DKA-01");
