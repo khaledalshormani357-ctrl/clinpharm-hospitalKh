@@ -11,6 +11,8 @@ import {
   buildSimulatorParamsFromPatient
 } from './clinicalReferences';
 import { DRUG_INTERACTIONS_DB } from './mockData';
+import { getSyncedFullBooksSync } from './googleDrive/fullBookIdb';
+import { formatImportedBookPassages, retrieveImportedBookPassages } from './clinicalKnowledge/retrieval';
 
 export interface GroundedNotebookSource {
   sourceIndex: number;
@@ -463,7 +465,15 @@ Board Pearls: ${src.boardPearls.join(' | ')}`
     )
     .join('\n\n========================================\n\n');
 
-  const notebookSourcesContext = [stockleyDdiBlock, numberedSourcesBlock].filter(Boolean).join('\n\n========================================\n\n');
+  // Search downloaded full-book page text locally and pass only a few cited passages to the AI.
+  // Lexical matches are retrieval candidates, not proof that a clinical claim is correct.
+  const importedPassages = retrieveImportedBookPassages(query, getSyncedFullBooksSync(), 4);
+  const importedBookContext = formatImportedBookPassages(importedPassages);
+  const notebookSourcesContext = [
+    stockleyDdiBlock,
+    numberedSourcesBlock,
+    importedBookContext
+  ].filter(Boolean).join('\n\n========================================\n\n');
 
   return {
     queryTokens,
