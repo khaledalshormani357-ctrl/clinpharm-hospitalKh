@@ -208,7 +208,9 @@ export function getAllVerbatimBooks(): VerbatimBook[] {
 
     return {
       ...baseBook,
-      edition: `${baseBook.edition} • Full PDF Synced (${synced.totalPages} Pages)`,
+      edition: synced.sourceType === 'embedded_synthetic'
+        ? `${baseBook.edition} • Embedded Offline Summary — NOT the original PDF`
+        : `${baseBook.edition} • Verified PDF Imported (${synced.totalPages} Pages)`,
       chapters: extraChapters.length > 0 ? [...baseBook.chapters, ...extraChapters] : baseBook.chapters
     };
   });
@@ -221,9 +223,15 @@ export function getAllVerbatimBooks(): VerbatimBook[] {
         id: synced.bookId,
         title: synced.customTitle || synced.fileName,
         titleAr: `مرجع مستورد بالكامل: ${synced.customTitle || synced.fileName}`,
-        subtitle: `100% Verbatim Synced PDF Book (${synced.totalPages} Pages • ${synced.totalChapters} Chapters)`,
-        subtitleAr: `كتاب كامل مستورد ومفهرس حرفياً (${synced.totalPages} صفحة • ${synced.totalChapters} فصلاً)`,
-        edition: `Full Synced PDF (${synced.totalPages} Pages)`,
+        subtitle: synced.sourceType === 'embedded_synthetic'
+          ? 'Embedded offline summary; not the original PDF'
+          : `Imported PDF (${synced.totalPages} Pages • ${synced.totalChapters} Chapters)`,
+        subtitleAr: synced.sourceType === 'embedded_synthetic'
+          ? 'ملخص مضمّن للعمل دون اتصال؛ ليس ملف PDF الأصلي'
+          : `ملف PDF مستورد (${synced.totalPages} صفحة • ${synced.totalChapters} فصلاً)`,
+        edition: synced.sourceType === 'embedded_synthetic'
+          ? 'Embedded Offline Summary — NOT the original PDF'
+          : `Imported PDF (${synced.totalPages} Pages)`,
         editors: 'Google Drive Synced Textbook',
         publisher: 'Google Drive / Local Full PDF Import',
         isbnOrUan: `Drive ID: ${synced.driveFileId}`,
