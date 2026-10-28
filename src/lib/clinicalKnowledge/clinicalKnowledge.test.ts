@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { convertExtractedPagesToKnowledge } from './convertExtractedPages';
 import { assertWithinKnowledgeLibraryBudget, estimateKnowledgeLibrarySize } from './knowledgeBudget';
 import { CLINICAL_LIBRARY_MAX_BYTES } from './knowledgeSchema';
+import { formatImportedBookPassages, retrieveImportedBookPassages } from './retrieval';
 
 describe('clinical knowledge conversion', () => {
   it('preserves source and exact PDF page citation for every extracted chunk', () => {
@@ -44,6 +45,25 @@ describe('clinical knowledge conversion', () => {
     });
     expect(records).toHaveLength(1);
     expect(records[0].citation.pdfPage).toBe(2);
+  });
+
+
+  it('retrieves locally imported book passages with exact source and PDF page citation', () => {
+    const books = [{
+      bookId: 'book-a',
+      fileName: 'Clinical Reference.pdf',
+      pages: [
+        { pageNumber: 14, text: 'Heart failure treatment requires clinical assessment and monitoring.', chapterTitle: 'Heart Failure', sectionId: 'Treatment' },
+        { pageNumber: 27, text: 'Renal function and creatinine should be monitored.', chapterTitle: 'Kidney Function', sectionId: 'Monitoring' }
+      ]
+    }] as unknown as import('../googleDrive/fullBookIdb').SyncedFullBookRecord[];
+
+    const matches = retrieveImportedBookPassages('heart failure treatment', books, 2);
+    expect(matches.length).toBeGreaterThan(0);
+    expect(matches[0].sourceId).toBe('book-a');
+    expect(matches[0].pdfPage).toBe(14);
+    expect(formatImportedBookPassages(matches)).toContain('PDF page 14');
+    expect(formatImportedBookPassages(matches)).toContain('not independently clinically validated');
   });
 
   it('enforces a configurable sub-gigabyte size budget', () => {
