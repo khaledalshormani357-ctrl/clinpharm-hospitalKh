@@ -11,6 +11,40 @@ const __dirname = path.dirname(__filename);
 
 const PORT = Number(process.env.PORT) || 3000;
 
+const MAX_DRIVE_PDF_BYTES = 25 * 1024 * 1024;
+
+async function readLimitedBuffer(response: Response): Promise<Buffer | null> {
+  const lengthHeader = response.headers.get('content-length');
+  const declaredLength = lengthHeader ? Number(lengthHeader) : 0;
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_DRIVE_PDF_BYTES) {
+    await response.body?.cancel().catch(() => undefined);
+    return null;
+  }
+  if (!response.body) return null;
+
+  const reader = response.body.getReader();
+  const chunks: Buffer[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > MAX_DRIVE_PDF_BYTES) {
+        await reader.cancel();
+        return null;
+      }
+      chunks.push(Buffer.from(value));
+    }
+    return Buffer.concat(chunks, totalBytes);
+  } catch (error) {
+    await reader.cancel().catch(() => undefined);
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 interface CopilotChatRequestBody {
   query: string;
   lang?: 'ar' | 'en';
@@ -319,14 +353,15 @@ ${verbatimLibraryContext || 'All 7 reference books (47 chapters) indexed.'}`;
 
           const upstream = await fetch(url, {
             headers,
-            redirect: 'follow'
+            redirect: 'follow',
+            signal: AbortSignal.timeout(15000)
           });
 
           if (!upstream.ok) continue;
 
           const contentType = upstream.headers.get('content-type') || '';
-          const arrayBuf = await upstream.arrayBuffer();
-          const buf = Buffer.from(arrayBuf);
+          const buf = await readLimitedBuffer(upstream);
+          if (!buf) continue;
 
           // Check if buffer starts with %PDF-
           if (buf.length > 5 && buf.subarray(0, 5).toString('ascii') === '%PDF-') {
@@ -351,11 +386,15 @@ ${verbatimLibraryContext || 'All 7 reference books (47 chapters) indexed.'}`;
               const confirmUrl = `https://drive.usercontent.google.com/download?id=${encodeURIComponent(
                 fileId
               )}&export=download&confirm=t&uuid=${encodeURIComponent(uuidMatch[1])}`;
-              const confirmedUpstream = await fetch(confirmUrl, { headers, redirect: 'follow' });
+              const confirmedUpstream = await fetch(confirmUrl, {
+                headers,
+                redirect: 'follow',
+                signal: AbortSignal.timeout(15000)
+              });
               if (confirmedUpstream.ok) {
-                const confirmedBuf = Buffer.from(await confirmedUpstream.arrayBuffer());
+                const confirmedBuf = await readLimitedBuffer(confirmedUpstream);
                 if (
-                  confirmedBuf.length > 5 &&
+                  confirmedBuf && confirmedBuf.length > 5 &&
                   confirmedBuf.subarray(0, 5).toString('ascii') === '%PDF-'
                 ) {
                   res.setHeader('Content-Type', 'application/pdf');
@@ -377,8 +416,9 @@ ${verbatimLibraryContext || 'All 7 reference books (47 chapters) indexed.'}`;
           'Could not download PDF directly. Ensure the Google Drive file sharing is set to "Anyone with the link" or sign in with Google.'
       });
     } catch (error: unknown) {
+      console.error('Google Drive PDF proxy failed:', error instanceof Error ? error.message : 'Unknown error');
       res.status(500).json({
-        error: error instanceof Error ? error.message : 'Failed to proxy Google Drive PDF'
+        error: 'Failed to retrieve the PDF. Please retry or verify the sharing settings.'
       });
     }
   });
