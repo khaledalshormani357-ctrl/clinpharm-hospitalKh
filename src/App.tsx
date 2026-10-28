@@ -9,7 +9,11 @@ import {
 } from './types/clinical';
 import { INITIAL_PATIENTS, INITIAL_INTERVENTIONS, INITIAL_DISCREPANCIES } from './lib/mockData';
 import { DashboardLayout } from './components/DashboardLayout';
-import { googleSignIn } from './lib/googleDrive/googleDriveAuth';
+import {
+  googleSignIn,
+  postBridgeResultToOpener,
+  validateBridgeCallerOrigin
+} from './lib/googleDrive/googleDriveAuth';
 
 const STORAGE_KEYS = {
   PATIENTS: 'clinpharm_patients_v2',
@@ -17,26 +21,56 @@ const STORAGE_KEYS = {
   DISCREPANCIES: 'clinpharm_discrepancies_v2'
 };
 
-function DriveOAuthBridgeView() {
-  const [status, setStatus] = useState<'ready' | 'signing_in' | 'done' | 'error'>('ready');
-  const [errorText, setErrorText] = useState<string>('');
+export function DriveOAuthBridgeView() {
+  const searchParams =
+    typeof window !== 'undefined'
+      ? new URLSearchParams(window.location.search)
+      : new URLSearchParams();
+  const rawCaller = searchParams.get('caller');
+  const stateParam = searchParams.get('state') || undefined;
+  const validatedCallerOrigin = validateBridgeCallerOrigin(rawCaller);
+  const hasOpener = typeof window !== 'undefined' && Boolean(window.opener);
+
+  const [status, setStatus] = useState<'ready' | 'signing_in' | 'done' | 'error'>(() =>
+    !validatedCallerOrigin || !hasOpener ? 'error' : 'ready'
+  );
+  const [errorText, setErrorText] = useState<string>(() => {
+    if (!validatedCallerOrigin) {
+      return 'رفض أمني: أصل النافذة المستدعية (caller) غير صالح أو غير مصرح به. / Security error: caller origin is invalid or unauthorized.';
+    }
+    if (!hasOpener) {
+      return 'النافذة الأصلية للتطبيق (window.opener) غير متاحة. يرجى فتح تسجيل الدخول من داخل نافذة التطبيق مباشرةً.';
+    }
+    return '';
+  });
 
   const startAuth = async () => {
+    if (!validatedCallerOrigin) {
+      setStatus('error');
+      setErrorText(
+        'رفض أمني: أصل النافذة المستدعية (caller) غير صالح أو غير مصرح به. / Security error: caller origin is invalid or unauthorized.'
+      );
+      return;
+    }
+
     setStatus('signing_in');
     setErrorText('');
     try {
       const res = await googleSignIn();
       if (res?.accessToken) {
-        setStatus('done');
-        if (window.opener) {
-          window.opener.postMessage(
-            {
-              type: 'CLINPHARM_DRIVE_OAUTH_SUCCESS',
-              accessToken: res.accessToken
-            },
-            '*'
-          );
+        const postResult = postBridgeResultToOpener(window.opener, rawCaller, {
+          type: 'CLINPHARM_DRIVE_OAUTH_SUCCESS',
+          accessToken: res.accessToken,
+          state: stateParam
+        });
+
+        if (!postResult.ok) {
+          setStatus('error');
+          setErrorText(postResult.error || 'Failed to return authorization to parent window.');
+          return;
         }
+
+        setStatus('done');
         setTimeout(() => {
           window.close();
         }, 500);
@@ -45,14 +79,12 @@ function DriveOAuthBridgeView() {
       const msg = err instanceof Error ? err.message : 'Google Sign-In failed';
       setStatus('error');
       setErrorText(msg);
-      if (window.opener) {
-        window.opener.postMessage(
-          {
-            type: 'CLINPHARM_DRIVE_OAUTH_ERROR',
-            error: msg
-          },
-          '*'
-        );
+      if (validatedCallerOrigin && window.opener) {
+        postBridgeResultToOpener(window.opener, rawCaller, {
+          type: 'CLINPHARM_DRIVE_OAUTH_ERROR',
+          error: msg,
+          state: stateParam
+        });
       }
     }
   };
@@ -70,6 +102,12 @@ function DriveOAuthBridgeView() {
           اضغط على الزر أدناه لتأكيد ربط حساب Google Drive عبر النطاق الموثق وإرسال التصريح تلقائياً إلى نافذة التطبيق.
         </p>
 
+        {validatedCallerOrigin && (
+          <div className="text-[11px] text-slate-400 font-mono bg-slate-950/60 border border-slate-800 rounded-lg py-1.5 px-2.5 truncate">
+            Origin: {validatedCallerOrigin}
+          </div>
+        )}
+
         {status === 'error' && (
           <div className="p-3 rounded-xl bg-rose-950/60 border border-rose-800 text-rose-200 text-xs">
             {errorText}
@@ -84,7 +122,7 @@ function DriveOAuthBridgeView() {
           <button
             type="button"
             onClick={() => void startAuth()}
-            disabled={status === 'signing_in'}
+            disabled={status === 'signing_in' || !validatedCallerOrigin || !hasOpener}
             className="w-full py-3 px-4 rounded-xl bg-teal-500 hover:bg-teal-400 disabled:opacity-50 text-slate-950 font-black text-xs sm:text-sm transition cursor-pointer"
           >
             {status === 'signing_in'

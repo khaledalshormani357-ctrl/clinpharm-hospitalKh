@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import crypto from 'crypto';
 import express from 'express';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
@@ -87,7 +88,7 @@ function extractForwardCookies(headers: Headers): string {
     .join('; ');
 }
 
-async function startServer() {
+export async function createApp(options?: { serveDistOnly?: boolean }) {
   const app = express();
 
   // Enable CORS on all API routes so GitHub Pages and Android APK clients can connect seamlessly
@@ -562,7 +563,10 @@ ${verbatimLibraryContext || 'All 7 reference books (47 chapters) indexed.'}`;
     res.status(404).json({ error: 'API endpoint not found' });
   });
 
-  if (process.env.NODE_ENV !== 'production') {
+  const isProdOrStatic =
+    options?.serveDistOnly === true || process.env.NODE_ENV === 'production';
+
+  if (!isProdOrStatic) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa'
@@ -570,15 +574,32 @@ ${verbatimLibraryContext || 'All 7 reference books (47 chapters) indexed.'}`;
     app.use(vite.middlewares);
   } else {
     const distPath = path.resolve(__dirname, 'dist');
-    app.use(express.static(distPath));
+    const distIndex = path.join(distPath, 'index.html');
+    const rootIndex = path.resolve(__dirname, 'index.html');
+
+    if (fs.existsSync(distPath)) {
+      app.use(express.static(distPath));
+    }
+
     app.get('*', (_req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+      if (fs.existsSync(distIndex)) {
+        res.sendFile(distIndex);
+      } else {
+        res.sendFile(rootIndex);
+      }
     });
   }
 
+  return app;
+}
+
+async function startServer() {
+  const app = await createApp();
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server listening on http://0.0.0.0:${PORT}`);
   });
 }
 
-startServer();
+if (process.env.VITEST !== 'true') {
+  void startServer();
+}
