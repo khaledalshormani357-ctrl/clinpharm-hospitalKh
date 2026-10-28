@@ -76,6 +76,16 @@ describe("security configuration regression checks", () => {
     expect(component).not.toContain("history: historyForApi");
   });
 
+  it("bounds Google Drive PDF proxy downloads and upstream request duration", () => {
+    const server = read("server.ts");
+    expect(server).toContain("MAX_DRIVE_PDF_BYTES = 25 * 1024 * 1024");
+    expect(server).toContain("async function readLimitedBuffer(response: Response)");
+    expect(server).toContain("if (totalBytes > MAX_DRIVE_PDF_BYTES)");
+    expect(server).toContain("signal: AbortSignal.timeout(15000)");
+    expect(server).toContain("Failed to retrieve the PDF. Please retry or verify the sharing settings.");
+    expect(server).not.toContain("error: error instanceof Error ? error.message : 'Failed to proxy Google Drive PDF'");
+  });
+
   it("does not make APK release errors invisible or depend on artifact upload quota", () => {
     const workflow = read(".github/workflows/build-android-apk.yml");
     expect(workflow).not.toContain("actions/upload-artifact@v4");
