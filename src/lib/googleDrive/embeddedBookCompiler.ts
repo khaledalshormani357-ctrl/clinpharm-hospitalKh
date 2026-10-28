@@ -355,6 +355,8 @@ export function compileEmbeddedBookToFullRecord(
     totalPages: pages.length,
     totalChapters: baseBook.chapters.length,
     totalCharacters,
+    emptyTextPagesCount: 0,
+    sourceType: 'embedded_synthetic',
     syncedAt: new Date().toISOString(),
     chapters: baseBook.chapters as VerbatimChapter[],
     pages
