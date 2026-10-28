@@ -526,6 +526,13 @@ function extractTablesFromPageText(pageText: string, pageNum: number): VerbatimR
   ];
 }
 
+export function hasPdfSignature(bytes: ArrayBuffer): boolean {
+  if (bytes.byteLength < 5) return false;
+  const header = new Uint8Array(bytes, 0, 5);
+  return header[0] === 0x25 && header[1] === 0x50 && header[2] === 0x44 &&
+    header[3] === 0x46 && header[4] === 0x2d;
+}
+
 export async function parsePdfBufferToFullBookRecord(options: {
   pdfBytes: ArrayBuffer;
   bookId: string;
@@ -534,6 +541,9 @@ export async function parsePdfBufferToFullBookRecord(options: {
   onProgress?: (progress: BookSyncProgress) => void;
 }): Promise<SyncedFullBookRecord> {
   const { pdfBytes, bookId, driveFileId, fileName, onProgress } = options;
+  if (!hasPdfSignature(pdfBytes)) {
+    throw new Error('Downloaded content is not a valid PDF response (missing %PDF- signature).');
+  }
   const pdfjsLib = await getPdfJs();
 
   // Clone buffer so pdf.js worker transfer doesn't detach the caller's ArrayBuffer
@@ -590,6 +600,7 @@ export async function parsePdfBufferToFullBookRecord(options: {
 
   const rawPages: { pageNumber: number; text: string; detectedHeading: string }[] = [];
   let totalCharacters = 0;
+  let emptyTextPagesCount = 0;
 
   for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
     if (pageNum === 1 || pageNum % 5 === 0 || pageNum === totalPages) {
@@ -609,6 +620,7 @@ export async function parsePdfBufferToFullBookRecord(options: {
       (textContent.items || []) as Array<Record<string, unknown>>
     );
 
+    if (!verbatimText.trim()) emptyTextPagesCount += 1;
     const finalPageText =
       verbatimText ||
       `[Page ${pageNum} of ${fileName} — Graphical/Scanned Figure Page. Switch to "Original PDF Page View" tab above to view the visual page.]`;
@@ -795,6 +807,8 @@ export async function parsePdfBufferToFullBookRecord(options: {
     totalPages,
     totalChapters: chapters.length,
     totalCharacters,
+    emptyTextPagesCount,
+    sourceType: 'google_drive_pdf',
     syncedAt: new Date().toISOString(),
     chapters,
     pages: allPageRecords
@@ -897,19 +911,26 @@ export async function ingestDriveFileAsFullBook(options: {
         message: `Completed! Indexed 100% of "${resolvedName}" (${record.totalPages} pages).`
       });
       return record;
-    } catch {
-      const { seedSingleEmbeddedBookOffline } = await import('./embeddedBookCompiler');
-      return await seedSingleEmbeddedBookOffline(
-        knownMapping ? knownMapping.bookId : cleanDriveId,
-        onProgress
-      );
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown download or PDF parsing error';
+      onProgress?.({
+        bookId: resolvedBookId,
+        fileName: knownMapping?.badge || cleanDriveId,
+        phase: 'error',
+        currentPage: 0,
+        totalPages: 0,
+        message: `Google Drive import failed; no embedded substitute was used. ${message}`
+      });
+      throw new Error(`Google Drive import failed; no embedded substitute was used. ${message}`);
     }
   }
 
   let metadata: DriveFileItem;
+  let metadataError: unknown;
   try {
     metadata = await getDriveFileMetadata(accessToken, cleanDriveId);
-  } catch {
+  } catch (error: unknown) {
+    metadataError = error;
     try {
       const { pdfBytes, fileName } = await fetchPublicDrivePdfViaProxy(cleanDriveId, accessToken);
       const resolvedName = knownMapping ? `${knownMapping.badge}.pdf` : fileName;
@@ -926,12 +947,18 @@ export async function ingestDriveFileAsFullBook(options: {
       }
       await saveSyncedFullBook(record, pdfBytes);
       return record;
-    } catch {
-      const { seedSingleEmbeddedBookOffline } = await import('./embeddedBookCompiler');
-      return await seedSingleEmbeddedBookOffline(
-        knownMapping ? knownMapping.bookId : cleanDriveId,
-        onProgress
-      );
+    } catch (proxyError: unknown) {
+      const metadataMessage = metadataError instanceof Error ? metadataError.message : 'Drive metadata request failed';
+      const proxyMessage = proxyError instanceof Error ? proxyError.message : 'Unknown proxy download error';
+      onProgress?.({
+        bookId: resolvedBookId,
+        fileName: knownMapping?.badge || cleanDriveId,
+        phase: 'error',
+        currentPage: 0,
+        totalPages: 0,
+        message: `Google Drive import failed; no embedded substitute was used. Metadata: ${metadataMessage}. Proxy: ${proxyMessage}`
+      });
+      throw new Error(`Google Drive import failed; no embedded substitute was used. Metadata: ${metadataMessage}. Proxy: ${proxyMessage}`);
     }
   }
 

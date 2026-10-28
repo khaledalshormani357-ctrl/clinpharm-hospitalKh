@@ -355,6 +355,8 @@ export function compileEmbeddedBookToFullRecord(
     totalPages: pages.length,
     totalChapters: baseBook.chapters.length,
     totalCharacters,
+    emptyTextPagesCount: 0,
+    sourceType: 'embedded_synthetic',
     syncedAt: new Date().toISOString(),
     chapters: baseBook.chapters as VerbatimChapter[],
     pages
@@ -378,7 +380,7 @@ export async function seedSingleEmbeddedBookOffline(
     phase: 'indexing',
     currentPage: record.totalPages,
     totalPages: record.totalPages,
-    message: `Indexing built-in full reference "${record.fileName}" (${record.totalPages} pages, ${record.totalChapters} chapters)...`
+    message: `Indexing embedded offline summary (not the original PDF) "${record.fileName}" (${record.totalPages} pages, ${record.totalChapters} chapters)...`
   });
 
   await saveSyncedFullBook(record, pdfBytes);
@@ -389,15 +391,15 @@ export async function seedSingleEmbeddedBookOffline(
     phase: 'completed',
     currentPage: record.totalPages,
     totalPages: record.totalPages,
-    message: `Completed! Full reference "${record.fileName}" (${record.totalPages} pages) is active in local IndexedDB storage.`
+    message: `Completed! Embedded offline summary (not the original PDF) "${record.fileName}" (${record.totalPages} pages) is active in local IndexedDB storage.`
   });
 
   return record;
 }
 
 /**
- * Automatically pre-loads all 7 accredited clinical reference books into IndexedDB
- * if they are not already present, ensuring 100% zero-setup offline availability.
+ * Automatically pre-loads embedded offline summaries for the 7 reference titles into IndexedDB
+ * if they are not already present, These are not the original publisher PDFs and must not be represented as full-book imports.
  */
 export async function ensureAllCoreBooksPreloadedOffline(
   forceRebuildAll: boolean = false,

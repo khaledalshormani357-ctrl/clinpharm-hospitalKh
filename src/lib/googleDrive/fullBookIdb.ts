@@ -18,6 +18,10 @@ export interface SyncedFullBookRecord {
   totalPages: number;
   totalChapters: number;
   totalCharacters: number;
+  /** Number of pages without an extractable text layer; these may require OCR. */
+  emptyTextPagesCount?: number;
+  /** Distinguishes actual imported PDFs from generated embedded reference samples. */
+  sourceType?: 'google_drive_pdf' | 'embedded_synthetic';
   syncedAt: string;
   customTitle?: string;
   customBadge?: string;
