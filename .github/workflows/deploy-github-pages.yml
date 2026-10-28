@@ -32,17 +32,10 @@ jobs:
       - name: Build Production PWA Frontend
         env:
           GITHUB_PAGES: "true"
-          VITE_GEMINI_API_KEY: ${{ secrets.VITE_GEMINI_API_KEY }}
         run: |
           npm run build
           cp dist/index.html dist/404.html
           touch dist/.nojekyll
-
-      - name: Upload Built Web App Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ClinPharm-Web-PWA-Build
-          path: ./dist
 
       - name: Deploy to gh-pages Branch
         uses: peaceiris/actions-gh-pages@v4

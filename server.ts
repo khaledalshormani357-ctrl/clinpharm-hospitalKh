@@ -4,21 +4,50 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
+import { verifySupabaseAccessToken } from './server/supabaseAuth';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PORT = Number(process.env.PORT) || 3000;
 
-interface ChatHistoryTurn {
-  role: 'user' | 'assistant';
-  text: string;
+const MAX_DRIVE_PDF_BYTES = 25 * 1024 * 1024;
+
+async function readLimitedBuffer(response: Response): Promise<Buffer | null> {
+  const lengthHeader = response.headers.get('content-length');
+  const declaredLength = lengthHeader ? Number(lengthHeader) : 0;
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_DRIVE_PDF_BYTES) {
+    await response.body?.cancel().catch(() => undefined);
+    return null;
+  }
+  if (!response.body) return null;
+
+  const reader = response.body.getReader();
+  const chunks: Buffer[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > MAX_DRIVE_PDF_BYTES) {
+        await reader.cancel();
+        return null;
+      }
+      chunks.push(Buffer.from(value));
+    }
+    return Buffer.concat(chunks, totalBytes);
+  } catch (error) {
+    await reader.cancel().catch(() => undefined);
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 interface CopilotChatRequestBody {
   query: string;
   lang?: 'ar' | 'en';
-  history?: ChatHistoryTurn[];
   patientContext?: string;
   referenceContext?: string;
   verbatimLibraryContext?: string;
@@ -27,13 +56,29 @@ interface CopilotChatRequestBody {
 async function startServer() {
   const app = express();
 
-  // Enable CORS on all API routes so GitHub Pages and Android APK clients can connect seamlessly
+  // CORS is a browser boundary, not authentication. Configure explicit web origins at runtime.
+  const nativeAppOrigins = ['https://localhost', 'http://localhost', 'capacitor://localhost'];
+  const configuredOrigins = [...new Set([
+    ...nativeAppOrigins,
+    ...(process.env.CORS_ALLOWED_ORIGINS || '')
+      .split(',')
+      .map(origin => origin.trim())
+      .filter(Boolean)
+  ])];
   app.use('/api', (req, res, next) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    res.setHeader('Access-Control-Expose-Headers', 'X-Drive-Filename, Content-Length');
+    const origin = req.headers.origin;
+    if (origin && configuredOrigins.includes(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      res.setHeader('Access-Control-Expose-Headers', 'X-Drive-Filename, Content-Length');
+    }
     if (req.method === 'OPTIONS') {
+      if (origin && !configuredOrigins.includes(origin)) {
+        res.status(403).end();
+        return;
+      }
       res.status(204).end();
       return;
     }
@@ -43,11 +88,10 @@ async function startServer() {
   app.use(express.json({ limit: '6mb' }));
 
   app.get('/api/copilot/health', (_req, res) => {
-    const hasKey = Boolean(process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY);
+    const hasKey = Boolean(process.env.GEMINI_API_KEY);
     res.json({
       ok: true,
-      liveAiReady: true,
-      hasApiKey: hasKey,
+      liveAiConfigured: hasKey,
       model: 'gemini-3-flash-preview',
       mode: 'NotebookLM Strict Reference Grounding',
       libraryBooksCount: 7,
@@ -110,22 +154,47 @@ async function startServer() {
   }
 
   app.post('/api/copilot/chat', async (req, res) => {
+    // Fail closed unless this server can validate a real Supabase user access token.
+    const authHeader = req.headers.authorization || '';
+    const accessToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+    const verification = await verifySupabaseAccessToken(accessToken, {
+      url: process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL,
+      anonKey: process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY
+    });
+    if (!verification.authenticated) {
+      res.status(verification.status).json({ error: verification.error });
+      return;
+    }
+
     try {
       const {
         query,
         lang = 'ar',
-        history = [],
         patientContext = '',
         referenceContext = '',
         verbatimLibraryContext = ''
       } = (req.body || {}) as CopilotChatRequestBody;
 
-      if (!query || !query.trim()) {
+      if (typeof query !== 'string' || !query.trim()) {
         res.status(400).json({ error: 'Query is required' });
         return;
       }
+      if (query.length > 12000) {
+        res.status(413).json({ error: 'Clinical query is too long. Please shorten it and retry.' });
+        return;
+      }
+      const optionalContexts = [patientContext, referenceContext, verbatimLibraryContext];
+      if (optionalContexts.some(value => typeof value !== 'string')) {
+        res.status(400).json({ error: 'Clinical context fields must be text.' });
+        return;
+      }
+      const contextBytes = optionalContexts.reduce((total, value) => total + Buffer.byteLength(value, 'utf8'), 0);
+      if (contextBytes > 2 * 1024 * 1024) {
+        res.status(413).json({ error: 'Clinical reference context is too large. Reduce the selected context and retry.' });
+        return;
+      }
 
-      const apiKey = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
+      const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) {
         const synthesized = extractGroundedSourceSynthesis(
           query.trim(),
@@ -179,16 +248,11 @@ ${referenceContext || 'See numbered verbatim sources below.'}
 NUMBERED VERBATIM TEXTBOOK SOURCES ([SOURCE 1] .. [SOURCE N]):
 ${verbatimLibraryContext || 'All 7 reference books (47 chapters) indexed.'}`;
 
-      const contents = [
-        ...history.slice(-4).map(turn => ({
-          role: turn.role === 'assistant' ? 'model' : 'user',
-          parts: [{ text: turn.text }]
-        })),
-        {
-          role: 'user',
-          parts: [{ text: query.trim() }]
-        }
-      ];
+      // Keep each model request stateless; never forward prior chat turns.
+      const contents = [{
+        role: 'user',
+        parts: [{ text: query.trim() }]
+      }];
 
       const candidateModels = [
         'gemini-3-flash-preview',
@@ -199,6 +263,7 @@ ${verbatimLibraryContext || 'All 7 reference books (47 chapters) indexed.'}`;
 
       let replyText = '';
       let usedModel = candidateModels[0];
+      let liveAi = false;
 
       for (const modelName of candidateModels) {
         try {
@@ -222,6 +287,7 @@ ${verbatimLibraryContext || 'All 7 reference books (47 chapters) indexed.'}`;
           if (text) {
             replyText = text;
             usedModel = modelName;
+            liveAi = true;
             break;
           }
         } catch (err) {
@@ -243,13 +309,13 @@ ${verbatimLibraryContext || 'All 7 reference books (47 chapters) indexed.'}`;
       res.json({
         text: replyText,
         model: usedModel,
-        liveAi: true
+        liveAi
       });
     } catch (error: unknown) {
       const errMessage = error instanceof Error ? error.message : 'Unknown Gemini API error';
       console.error('Error in /api/copilot/chat:', errMessage);
       res.status(500).json({
-        error: errMessage
+        error: 'Clinical copilot request failed. Please retry or contact the system administrator.'
       });
     }
   });
@@ -287,14 +353,15 @@ ${verbatimLibraryContext || 'All 7 reference books (47 chapters) indexed.'}`;
 
           const upstream = await fetch(url, {
             headers,
-            redirect: 'follow'
+            redirect: 'follow',
+            signal: AbortSignal.timeout(15000)
           });
 
           if (!upstream.ok) continue;
 
           const contentType = upstream.headers.get('content-type') || '';
-          const arrayBuf = await upstream.arrayBuffer();
-          const buf = Buffer.from(arrayBuf);
+          const buf = await readLimitedBuffer(upstream);
+          if (!buf) continue;
 
           // Check if buffer starts with %PDF-
           if (buf.length > 5 && buf.subarray(0, 5).toString('ascii') === '%PDF-') {
@@ -319,11 +386,15 @@ ${verbatimLibraryContext || 'All 7 reference books (47 chapters) indexed.'}`;
               const confirmUrl = `https://drive.usercontent.google.com/download?id=${encodeURIComponent(
                 fileId
               )}&export=download&confirm=t&uuid=${encodeURIComponent(uuidMatch[1])}`;
-              const confirmedUpstream = await fetch(confirmUrl, { headers, redirect: 'follow' });
+              const confirmedUpstream = await fetch(confirmUrl, {
+                headers,
+                redirect: 'follow',
+                signal: AbortSignal.timeout(15000)
+              });
               if (confirmedUpstream.ok) {
-                const confirmedBuf = Buffer.from(await confirmedUpstream.arrayBuffer());
+                const confirmedBuf = await readLimitedBuffer(confirmedUpstream);
                 if (
-                  confirmedBuf.length > 5 &&
+                  confirmedBuf && confirmedBuf.length > 5 &&
                   confirmedBuf.subarray(0, 5).toString('ascii') === '%PDF-'
                 ) {
                   res.setHeader('Content-Type', 'application/pdf');
@@ -345,8 +416,9 @@ ${verbatimLibraryContext || 'All 7 reference books (47 chapters) indexed.'}`;
           'Could not download PDF directly. Ensure the Google Drive file sharing is set to "Anyone with the link" or sign in with Google.'
       });
     } catch (error: unknown) {
+      console.error('Google Drive PDF proxy failed:', error instanceof Error ? error.message : 'Unknown error');
       res.status(500).json({
-        error: error instanceof Error ? error.message : 'Failed to proxy Google Drive PDF'
+        error: 'Failed to retrieve the PDF. Please retry or verify the sharing settings.'
       });
     }
   });

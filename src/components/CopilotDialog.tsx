@@ -28,6 +28,7 @@ import {
   MatchedStockleyDdi
 } from '../lib/notebookLmEngine';
 import { hydrateSyncedFullBooks } from '../lib/googleDrive/fullBookIdb';
+import { supabase } from '../lib/supabase/client';
 
 interface Message {
   id: string;
@@ -115,7 +116,7 @@ Ask any clinical pharmacotherapy, renal/hepatic dosing, or Stockley’s DDI ques
 
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [liveAiStatus, setLiveAiStatus] = useState<'checking' | 'connected' | 'error'>('connected');
+  const [liveAiStatus, setLiveAiStatus] = useState<'checking' | 'configured' | 'connected' | 'grounded' | 'error'>('checking');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -136,7 +137,7 @@ Ask any clinical pharmacotherapy, renal/hepatic dosing, or Stockley’s DDI ques
         if (res.ok && ct.includes('application/json')) {
           const data = await res.json();
           if (data?.ok && !cancelled) {
-            setLiveAiStatus('connected');
+            setLiveAiStatus(data.liveAiConfigured ? 'configured' : 'grounded');
             return;
           }
         }
@@ -144,7 +145,7 @@ Ask any clinical pharmacotherapy, renal/hepatic dosing, or Stockley’s DDI ques
         // Ignore and keep grounded mode active
       }
       if (!cancelled) {
-        setLiveAiStatus('connected');
+        setLiveAiStatus('error');
       }
     };
 
@@ -177,13 +178,7 @@ Ask any clinical pharmacotherapy, renal/hepatic dosing, or Stockley’s DDI ques
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
 
-    const historyForApi = messages
-      .filter(m => !m.isError)
-      .slice(-4)
-      .map(m => ({
-        role: m.sender,
-        text: m.text
-      }));
+    // Do not transmit prior chat turns by default; they may contain patient identifiers.
 
     setMessages(prev => [...prev, userMsg]);
     setInput('');
@@ -193,10 +188,12 @@ Ask any clinical pharmacotherapy, renal/hepatic dosing, or Stockley’s DDI ques
       // 1. Run NotebookLM Deep Multi-Token Bilingual Reference Retrieval across all 7 books (47+ chapters) & Stockley's DDI DB
       const groundingBundle = buildNotebookLmGrounding(currentInput, lang, currentPatient);
 
+      const sessionResult = await supabase?.auth.getSession();
+      const accessToken = sessionResult?.data.session?.access_token;
       const requestPayload = {
         query: currentInput,
         lang,
-        history: historyForApi,
+        history: [],
         patientContext: groundingBundle.patientContext,
         referenceContext: groundingBundle.referenceContext,
         verbatimLibraryContext: groundingBundle.notebookSourcesContext
@@ -209,6 +206,7 @@ Ask any clinical pharmacotherapy, renal/hepatic dosing, or Stockley’s DDI ques
       ];
 
       let replyText = '';
+      let usedLiveAi = false;
       let usedModelBadge = `NotebookLM Grounded AI • ${groundingBundle.numberedSources.length} Sources Cited`;
 
       // 2. Try Server Endpoints (Fast <2.5s Gemini 3 Flash with ThinkingLevel.LOW)
@@ -219,7 +217,8 @@ Ask any clinical pharmacotherapy, renal/hepatic dosing, or Stockley’s DDI ques
           const response = await fetch(endpoint, {
             method: 'POST',
             headers: {
-              'Content-Type': 'application/json'
+              'Content-Type': 'application/json',
+              ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {})
             },
             body: JSON.stringify(requestPayload),
             signal: ctrl.signal
@@ -235,6 +234,7 @@ Ask any clinical pharmacotherapy, renal/hepatic dosing, or Stockley’s DDI ques
           const data = await response.json();
           if (response.ok && data?.text) {
             replyText = data.text;
+            usedLiveAi = data.liveAi === true;
             if (data.model) {
               usedModelBadge = `${data.model} • NotebookLM (${groundingBundle.numberedSources.length} Sources)`;
             }
@@ -248,61 +248,7 @@ Ask any clinical pharmacotherapy, renal/hepatic dosing, or Stockley’s DDI ques
         }
       }
 
-      // 3. Direct @google/genai SDK execution for standalone GitHub Pages / Android APK builds
-      if (!replyText && import.meta.env.VITE_GEMINI_API_KEY) {
-        const directModels = [
-          'gemini-3-flash-preview',
-          'gemini-3.8-flash',
-          'gemini-3.1-flash-lite',
-          'gemini-flash-latest'
-        ];
-
-        const sysPrompt = `You are "ClinPharm NotebookLM AI", a strict Source-Grounded Clinical Pharmacy Reference Analyst (modeled after Google NotebookLM).
-CRITICAL RULES:
-1. Answer ONLY from the provided NUMBERED ACCREDITED REFERENCE SOURCES ([SOURCE 1]..[SOURCE N]), MATCHED STOCKLEY'S DRUG INTERACTIONS, and ACTIVE INPATIENT CHART. Never make up or extrapolate unverified facts.
-2. Every clinical claim, drug dose, renal cutoff, or interaction mechanism MUST include an inline numbered citation like [1], [2], [Stockley's DDI].
-3. State exact numerical doses, infusion ceilings, washout periods, and TDM targets from the sources.
-4. End with a "${lang === 'ar' ? 'المراجع الموثّقة المقتبسة (Cited Reference Sources):' : 'Cited Reference Sources:'}" section listing [1], [2], ... with Book Title, Chapter, and Pages.
-5. Language: ${
-          lang === 'ar'
-            ? 'Respond in professional "Medical Mix" (Arabic clinical syntax with English drug names, enzymes, and medical terms).'
-            : 'Respond in authoritative clinical English.'
-        }`;
-
-        const fullPrompt = `ACTIVE INPATIENT CHART:\n${groundingBundle.patientContext}\n\nMATCHED STOCKLEY'S DDI:\n${groundingBundle.referenceContext}\n\nNUMBERED VERBATIM TEXTBOOK SOURCES:\n${groundingBundle.notebookSourcesContext}\n\nClinical Question:\n${currentInput}`;
-
-        for (const modelName of directModels) {
-          try {
-            const { GoogleGenAI, ThinkingLevel } = await import('@google/genai');
-            const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
-            const isGemini3 = modelName.startsWith('gemini-3');
-            const aiRes = await ai.models.generateContent({
-              model: modelName,
-              contents: fullPrompt,
-              config: {
-                systemInstruction: sysPrompt,
-                temperature: 0.1,
-                ...(isGemini3
-                  ? {
-                      thinkingConfig: {
-                        thinkingLevel: ThinkingLevel.LOW
-                      }
-                    }
-                  : {})
-              }
-            });
-            const text = aiRes.text?.trim() || '';
-            if (text) {
-              replyText = text;
-              usedModelBadge = `${modelName} • NotebookLM Direct (${groundingBundle.numberedSources.length} Sources)`;
-              break;
-            }
-          } catch {
-            // Try next model in direct SDK fallback chain
-            continue;
-          }
-        }
-      }
+      // Gemini requests must go through the server; never use a client-side API key.
 
       // 4. Offline Verbatim NotebookLM Reference Extractor (100% query-specific, strictly quotes matched [1]..[4] sources & tables, zero canned filler)
       if (!replyText) {
@@ -315,7 +261,7 @@ CRITICAL RULES:
         usedModelBadge = `NotebookLM Verbatim Extractor • ${groundingBundle.numberedSources.length} Sources Cited`;
       }
 
-      setLiveAiStatus('connected');
+      setLiveAiStatus(usedLiveAi ? 'connected' : 'grounded');
 
       const sourceCitations = groundingBundle.numberedSources.map(src => ({
         title: `[${src.sourceIndex}] ${lang === 'ar' ? src.bookBadgeAr : src.bookBadge}: Ch.${src.chapterNumber} (${src.sectionNumber})`,
@@ -382,8 +328,10 @@ CRITICAL RULES:
                     className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${
                       liveAiStatus === 'connected'
                         ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/40'
-                        : liveAiStatus === 'checking'
+                        : liveAiStatus === 'checking' || liveAiStatus === 'configured'
                         ? 'bg-amber-500/20 text-amber-200 border-amber-400/40'
+                        : liveAiStatus === 'grounded'
+                        ? 'bg-sky-500/20 text-sky-200 border-sky-400/40'
                         : 'bg-rose-500/20 text-rose-200 border-rose-400/40'
                     }`}
                   >
@@ -391,15 +339,25 @@ CRITICAL RULES:
                       <>
                         <ShieldCheck className="w-3 h-3" />
                         <span>
-                          {lang === 'ar' ? 'إجابات موثقة 100% من المراجع' : '100% Source-Grounded'}
+                          {lang === 'ar' ? 'استجابة Gemini مباشرة' : 'Live Gemini response'}
                         </span>
                       </>
                     ) : liveAiStatus === 'checking' ? (
-                      <span>Connecting AI...</span>
+                      <span>{lang === 'ar' ? 'جارٍ التحقق من حالة الخادم...' : 'Checking server status...'}</span>
+                    ) : liveAiStatus === 'configured' ? (
+                      <>
+                        <AlertCircle className="w-3 h-3" />
+                        <span>{lang === 'ar' ? 'Gemini مهيأ؛ الاتصال غير مؤكد' : 'Gemini configured; connection unverified'}</span>
+                      </>
+                    ) : liveAiStatus === 'grounded' ? (
+                      <>
+                        <BookOpen className="w-3 h-3" />
+                        <span>{lang === 'ar' ? 'وضع المراجع المحلي' : 'Local reference mode'}</span>
+                      </>
                     ) : (
                       <>
                         <AlertCircle className="w-3 h-3" />
-                        <span>Check Server</span>
+                        <span>{lang === 'ar' ? 'تعذر التحقق من الخادم' : 'Server status unavailable'}</span>
                       </>
                     )}
                   </span>

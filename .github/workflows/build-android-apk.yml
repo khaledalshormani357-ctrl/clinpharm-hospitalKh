@@ -46,7 +46,6 @@ jobs:
       - name: Build Web Application Bundle
         env:
           GITHUB_PAGES: "true"
-          VITE_GEMINI_API_KEY: ${{ secrets.VITE_GEMINI_API_KEY }}
         run: npm run build
 
       - name: Generate Fresh Capacitor Android Project & Sync Assets
@@ -66,20 +65,14 @@ jobs:
         run: |
           cp android/app/build/outputs/apk/debug/app-debug.apk ClinPharm-Hospital-Android.apk
 
-      - name: Upload Android APK Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ClinPharm-Hospital-Android-APK
-          path: ClinPharm-Hospital-Android.apk
-
       - name: Publish APK to GitHub Releases
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if gh release view v2.6.0-latest >/dev/null 2>&1; then
-            gh release upload v2.6.0-latest ClinPharm-Hospital-Android.apk --clobber || true
+            gh release upload v2.6.0-latest ClinPharm-Hospital-Android.apk --clobber
           else
             gh release create v2.6.0-latest ClinPharm-Hospital-Android.apk \
               --title "ClinPharm Hospital CDSS — Official Android APK & Offline Library Release" \
-              --notes "ClinPharm Hospital Android APK (ClinPharm-Hospital-Android.apk) with full 6-book clinical library, Google Drive PDF sync, and Gemini 3.8 Flash Copilot." || true
+              --notes "ClinPharm Hospital Android APK (ClinPharm-Hospital-Android.apk). Verify clinical and security validation status before clinical use."
           fi
