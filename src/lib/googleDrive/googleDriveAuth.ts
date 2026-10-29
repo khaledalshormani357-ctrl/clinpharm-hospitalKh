@@ -324,86 +324,29 @@ export function handleBridgeWindowMessage(
   return true;
 }
 
-let gisScriptPromise: Promise<void> | null = null;
-function loadGoogleIdentityServicesScript(): Promise<void> {
-  if (typeof window === 'undefined') return Promise.resolve();
-  const win = window as unknown as { google?: { accounts?: { oauth2?: unknown } } };
-  if (win.google?.accounts?.oauth2) {
-    return Promise.resolve();
+async function isHostnameInFirebaseAuthorizedDomains(hostname: string): Promise<boolean> {
+  if (!hostname) return false;
+  if (isAuthorizedFirebaseDomain(hostname)) {
+    return true;
   }
-  if (gisScriptPromise) return gisScriptPromise;
-
-  gisScriptPromise = new Promise((resolve, reject) => {
-    const existing = document.querySelector('script[src="https://accounts.google.com/gsi/client"]');
-    if (existing) {
-      existing.addEventListener('load', () => resolve());
-      existing.addEventListener('error', () => reject(new Error('Failed to load Google GIS script')));
-      return;
-    }
-    const script = document.createElement('script');
-    script.src = 'https://accounts.google.com/gsi/client';
-    script.async = true;
-    script.defer = true;
-    script.onload = () => resolve();
-    script.onerror = () => {
-      gisScriptPromise = null;
-      reject(new Error('Failed to load Google Identity Services script'));
-    };
-    document.head.appendChild(script);
-  });
-
-  return gisScriptPromise;
-}
-
-async function signInViaGoogleIdentityServices(): Promise<string> {
-  await loadGoogleIdentityServicesScript();
-  return new Promise<string>((resolve, reject) => {
-    const win = window as unknown as {
-      google?: {
-        accounts?: {
-          oauth2?: {
-            initTokenClient: (config: {
-              client_id: string;
-              scope: string;
-              prompt?: string;
-              callback: (response: {
-                access_token?: string;
-                error?: string;
-                error_description?: string;
-              }) => void;
-              error_callback?: (err: { type?: string; message?: string }) => void;
-            }) => { requestAccessToken: (overrideConfig?: { prompt?: string }) => void };
-          };
-        };
-      };
-    };
-
-    const oauth2 = win.google?.accounts?.oauth2;
-    if (!oauth2) {
-      reject(new Error('Google Identity Services OAuth2 client not available'));
-      return;
-    }
-
-    const tokenClient = oauth2.initTokenClient({
-      client_id: OAUTH_CLIENT_ID,
-      scope: RUNTIME_DRIVE_SCOPES.join(' '),
-      prompt: 'select_account',
-      callback: response => {
-        if (response.error || !response.access_token) {
-          reject(
-            new Error(response.error_description || response.error || 'OAuth token request failed')
-          );
-          return;
-        }
-        resolve(response.access_token);
-      },
-      error_callback: err => {
-        reject(new Error(err?.message || err?.type || 'Google OAuth popup closed or blocked'));
-      }
-    });
-
-    tokenClient.requestAccessToken({ prompt: 'select_account' });
-  });
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3000);
+    const res = await fetch(
+      `https://www.googleapis.com/identitytoolkit/v3/relyingparty/getProjectConfig?key=${encodeURIComponent(
+        firebaseConfig.apiKey
+      )}`,
+      { method: 'GET', signal: controller.signal }
+    );
+    clearTimeout(timer);
+    if (!res.ok) return false;
+    const data = (await res.json()) as { authorizedDomains?: string[] };
+    if (!Array.isArray(data.authorizedDomains)) return false;
+    const normalized = hostname.toLowerCase();
+    return data.authorizedDomains.some(d => d.toLowerCase() === normalized);
+  } catch {
+    return false;
+  }
 }
 
 async function checkBridgeServiceReachable(bridgeOrigin: string): Promise<boolean> {
@@ -497,7 +440,7 @@ async function signInViaAuthorizedBridgePopup(): Promise<string> {
         }
         reject(
           new Error(
-            `خدمة وسيط Google OAuth على Cloud Run (${AUTHORIZED_BRIDGE_ORIGIN}) غير منشورة حالياً أو تعيد 404. يرجى نشر/مشاركة أحدث نسخة من التطبيق على Cloud Run أو استخدام استيراد ملفات PDF مباشرةً. / Cloud Run OAuth Bridge (${AUTHORIZED_BRIDGE_ORIGIN}) is currently unreachable (HTTP 404).`
+            `خدمة وسيط Google OAuth على Cloud Run (${AUTHORIZED_BRIDGE_ORIGIN}) غير منشورة حالياً (HTTP 404)، والنطاق الحالي (${window.location.origin}) غير مسجّل في Firebase Authorized Domains. لتفعيل تسجيل الدخول المباشر من هذا النطاق، أضف "${window.location.hostname}" في Firebase Console (Authentication -> Settings -> Authorized domains) أو انشر التطبيق على Cloud Run، أو استخدم الاستيراد المباشر بالرابط أدناه.`
           )
         );
       }
@@ -534,50 +477,44 @@ export async function applyManualOrBridgedAccessToken(
   return { user: userCred.user, accessToken: cleanToken };
 }
 
+async function signInViaFirebasePopup(): Promise<{ user: User; accessToken: string }> {
+  const result = await signInWithPopup(auth, provider);
+  const credential = GoogleAuthProvider.credentialFromResult(result);
+  if (!credential?.accessToken) {
+    throw new Error('Failed to obtain Google Drive OAuth access token from Firebase Auth.');
+  }
+
+  cachedAccessToken = credential.accessToken;
+  cachedUser = result.user;
+  notifyListeners();
+  return { user: result.user, accessToken: cachedAccessToken };
+}
+
 // Must be called from a button click or user interaction
 export const googleSignIn = async (): Promise<{ user: User; accessToken: string } | null> => {
   try {
     isSigningIn = true;
     const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
 
-    // 1. If running on GitHub Pages (*.github.io) or localhost/APK (not in Firebase authorizedDomains),
-    //    try the Authorized Cloud Run OAuth Bridge Popup first, with automatic fallback to GIS if available.
-    if (!isAuthorizedFirebaseDomain(hostname)) {
-      try {
-        const bridgedToken = await signInViaAuthorizedBridgePopup();
-        return await applyManualOrBridgedAccessToken(bridgedToken);
-      } catch (bridgeErr) {
-        const bridgeMsg = bridgeErr instanceof Error ? bridgeErr.message : '';
-        // If the Cloud Run bridge returned 404 / unreachable, attempt direct GIS token client if loaded
-        if (bridgeMsg.includes('404') || bridgeMsg.includes('unreachable')) {
-          try {
-            const gisToken = await signInViaGoogleIdentityServices();
-            return await applyManualOrBridgedAccessToken(gisToken);
-          } catch {
-            throw bridgeErr;
-          }
-        }
-        throw bridgeErr;
-      }
+    // 1. On authorized Firebase domains (*.run.app, *.firebaseapp.com, *.web.app)
+    //    always use Firebase signInWithPopup directly (routes via firebaseapp.com/__/auth/handler
+    //    and NEVER triggers Google OAuth Error 400: origin_mismatch).
+    if (isAuthorizedFirebaseDomain(hostname)) {
+      return await signInViaFirebasePopup();
     }
 
-    // 2. On authorized *.run.app domains, use Google Identity Services (direct accounts.google.com flow)
-    //    which completely bypasses firebaseapp.com/__/auth/handler sessionStorage partitioning issues!
-    try {
-      const gisToken = await signInViaGoogleIdentityServices();
-      return await applyManualOrBridgedAccessToken(gisToken);
-    } catch {
-      const result = await signInWithPopup(auth, provider);
-      const credential = GoogleAuthProvider.credentialFromResult(result);
-      if (!credential?.accessToken) {
-        throw new Error('Failed to obtain Google Drive OAuth access token.');
-      }
-
-      cachedAccessToken = credential.accessToken;
-      cachedUser = result.user;
-      notifyListeners();
-      return { user: result.user, accessToken: cachedAccessToken };
+    // 2. For other origins (e.g. localhost, Android Capacitor APK, or *.github.io),
+    //    check if the developer has added this hostname to Firebase Authorized Domains.
+    //    If not, route through the Authorized Cloud Run OAuth Bridge Popup.
+    //    Never invoke Google Identity Services initTokenClient directly on unregistered
+    //    origins, as that causes Google OAuth Error 400: origin_mismatch.
+    const isDynamicallyAuthorized = await isHostnameInFirebaseAuthorizedDomains(hostname);
+    if (isDynamicallyAuthorized) {
+      return await signInViaFirebasePopup();
     }
+
+    const bridgedToken = await signInViaAuthorizedBridgePopup();
+    return await applyManualOrBridgedAccessToken(bridgedToken);
   } catch (error: unknown) {
     const safeMsg = error instanceof Error ? error.message : 'Google Drive sign-in failed';
     console.error('Google Drive sign-in error:', safeMsg);

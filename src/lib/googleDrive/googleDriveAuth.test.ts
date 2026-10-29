@@ -11,6 +11,7 @@ import {
   generateOAuthStateNonce,
   handleBridgeWindowMessage,
   isAllowedBridgeProviderOrigin,
+  isAuthorizedFirebaseDomain,
   postBridgeResultToOpener,
   validateBridgeCallerOrigin,
 } from './googleDriveAuth';
@@ -233,5 +234,18 @@ describe('Google Drive OAuth Bridge & Express Routing Verification Suite', () =>
       ...consoleErrorSpy.mock.calls.flat(),
     ].join(' ');
     expect(allLoggedArgs).not.toContain(sensitiveToken);
+  });
+
+  it('6. recognizes authorized Firebase domains (*.run.app, *.firebaseapp.com, *.web.app) to avoid GIS origin_mismatch (Error 400)', () => {
+    expect(
+      isAuthorizedFirebaseDomain('ais-dev-sr6y5mqqoromsgvakmmu26-177021215798.europe-west2.run.app')
+    ).toBe(true);
+    expect(
+      isAuthorizedFirebaseDomain('ais-pre-sr6y5mqqoromsgvakmmu26-177021215798.europe-west2.run.app')
+    ).toBe(true);
+    expect(isAuthorizedFirebaseDomain('gen-lang-client-0487905478.firebaseapp.com')).toBe(true);
+    expect(isAuthorizedFirebaseDomain('gen-lang-client-0487905478.web.app')).toBe(true);
+    expect(isAuthorizedFirebaseDomain('localhost')).toBe(false);
+    expect(isAuthorizedFirebaseDomain('khaledalshormani357-ctrl.github.io')).toBe(false);
   });
 });
