@@ -537,11 +537,23 @@ ${verbatimLibraryContext || 'All 7 reference books (47 chapters) indexed.'}`;
         return;
       }
       if (bookId && fs.existsSync(bundledPackPath)) {
-        const gzBuf = fs.readFileSync(bundledPackPath);
-        const jsonBuf = zlib.gunzipSync(gzBuf);
+        // Stream decompression instead of readFileSync + gunzipSync: large packs must
+        // not block the Node event loop or require a second full-size JSON buffer.
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
-        res.setHeader('Content-Length', String(jsonBuf.length));
-        res.send(jsonBuf);
+        res.setHeader('Cache-Control', 'private, max-age=300');
+        const source = fs.createReadStream(bundledPackPath);
+        const gunzip = zlib.createGunzip();
+        const failStream = (error: Error) => {
+          console.error(`Failed to stream vault pack "${bookId}":`, error.message);
+          if (!res.headersSent) {
+            res.status(500).json({ ok: false, error: 'Failed to decompress server vault book.' });
+          } else {
+            res.destroy(error);
+          }
+        };
+        source.on('error', failStream);
+        gunzip.on('error', failStream);
+        source.pipe(gunzip).pipe(res);
         return;
       }
       res.status(404).json({ ok: false, error: `Pre-indexed book "${bookId}" not found in server vault.` });
