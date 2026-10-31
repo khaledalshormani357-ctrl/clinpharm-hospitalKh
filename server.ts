@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { execSync } from 'child_process';
 import crypto from 'crypto';
 import express from 'express';
 import fs from 'fs';
@@ -533,6 +534,22 @@ ${verbatimLibraryContext || 'All 7 reference books (47 chapters) indexed.'}`;
     }
   });
 
+  // Trigger a re-check of Google Drive links (e.g., after changing sharing permissions for Stockley's to "Anyone with the link")
+  app.post('/api/books/server-vault/reseed', async (_req, res) => {
+    try {
+      await ensureServerVaultSeeded();
+      const books: VaultBookSummary[] = fs.existsSync(VAULT_INDEX_PATH)
+        ? (JSON.parse(fs.readFileSync(VAULT_INDEX_PATH, 'utf8')) as VaultBookSummary[])
+        : [];
+      res.json({ ok: true, books });
+    } catch (err: unknown) {
+      res.status(500).json({
+        ok: false,
+        error: err instanceof Error ? err.message : 'Failed to reseed server vault'
+      });
+    }
+  });
+
   // Direct Google Drive Authorized / Shared Link PDF Proxy with cookie-preserving confirmation, RAR extraction & size limits
   app.get('/api/drive/fetch-pdf', async (req, res) => {
     try {
@@ -553,6 +570,10 @@ ${verbatimLibraryContext || 'All 7 reference books (47 chapters) indexed.'}`;
           '1-nvGR8JU21uXROJKtnnqOiCWESIiqeKt': {
             pdfFile: 'accp-cardiology-2026.pdf',
             origName: 'ACCP_2026_Cardiology_Pharmacy_Prep.pdf'
+          },
+          '1eg07NXxWYgJq0NxLf0Vim1JlV7KTu16S': {
+            pdfFile: 'stockleys-drug-interactions.pdf',
+            origName: 'Stockleys_Drug_Interactions_Pocket_Companion.pdf'
           },
           '1yYqokFGeNRAGcZMu5iCmERQn9w_PD1By':
             targetBookId === 'accp-2026-vol2'
@@ -1238,6 +1259,30 @@ export async function ensureServerVaultSeeded(): Promise<void> {
         displayTitle: "DiPiro's Pharmacotherapy: A Pathophysiologic Approach (13th Edition)",
         isRar: false,
         knownTotalPages: 6032
+      },
+      {
+        bookId: 'stockleys-drug-interactions',
+        driveFileId: '1eg07NXxWYgJq0NxLf0Vim1JlV7KTu16S',
+        sourceFileName: 'Stockleys_Drug_Interactions_Pocket_Companion.pdf',
+        displayTitle: "Stockley's Drug Interactions Pocket Companion (Claire L. Preston)",
+        isRar: false,
+        knownTotalPages: 0
+      },
+      {
+        bookId: 'clinical-casebook-guide',
+        driveFileId: '1mV4XwXY6k3f8zi-GO321tKUzqwRw-4lP',
+        sourceFileName: 'Schwinghammer_Pharmacotherapy_Casebook_13th_Ed.pdf',
+        displayTitle: "Schwinghammer's Pharmacotherapy Casebook: A Patient-Focused Approach (13th Edition)",
+        isRar: false,
+        knownTotalPages: 0
+      },
+      {
+        bookId: 'hospital-compendium',
+        driveFileId: '1nMrGfPbBjhkgRUehntRDQHyV6VAKRWkC',
+        sourceFileName: 'Sanford_Guide_Antimicrobial_Therapy.pdf',
+        displayTitle: 'The Sanford Guide to Antimicrobial Therapy & Hospital Compendium',
+        isRar: false,
+        knownTotalPages: 0
       }
     ];
 
@@ -1276,6 +1321,7 @@ export async function ensureServerVaultSeeded(): Promise<void> {
       }
 
       try {
+        let zipBuffer: Buffer | null = null;
         if (!fs.existsSync(pdfPath) || fs.statSync(pdfPath).size <= 1000) {
           if (target.isRar) {
             if (!rarBufferCache) {
@@ -1292,6 +1338,22 @@ export async function ensureServerVaultSeeded(): Promise<void> {
             const downloaded = await downloadDrivePayloadForVault(target.driveFileId);
             if (downloaded.length > 5 && downloaded.subarray(0, 5).toString('ascii') === '%PDF-') {
               fs.writeFileSync(pdfPath, downloaded);
+            } else if (downloaded.length > 7 && downloaded.subarray(0, 4).toString('ascii') === 'Rar!') {
+              const extracted = await extractPdfFromRarBuffer(
+                downloaded,
+                target.bookId,
+                target.sourceFileName
+              );
+              if (!extracted) continue;
+              fs.writeFileSync(pdfPath, extracted.pdfBuffer);
+            } else if (
+              downloaded.length > 4 &&
+              downloaded[0] === 0x50 &&
+              downloaded[1] === 0x4b &&
+              downloaded[2] === 0x03 &&
+              downloaded[3] === 0x04
+            ) {
+              zipBuffer = downloaded;
             } else {
               continue;
             }
@@ -1299,7 +1361,175 @@ export async function ensureServerVaultSeeded(): Promise<void> {
         }
 
         let compactRecord: Record<string, any>;
-        if (target.knownTotalPages > 2000) {
+        if (zipBuffer) {
+          const zipPath = path.join(VAULT_PDFS_DIR, `${target.bookId}.zip`);
+          const extractDir = path.join(SERVER_VAULT_DIR, `zip_${target.bookId}`);
+          fs.writeFileSync(zipPath, zipBuffer);
+          fs.rmSync(extractDir, { recursive: true, force: true });
+          fs.mkdirSync(extractDir, { recursive: true });
+          execSync(`unzip -q "${zipPath}" -d "${extractDir}"`);
+
+          const findPdfs = (dir: string): string[] => {
+            const out: string[] = [];
+            for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+              const p = path.join(dir, entry.name);
+              if (entry.isDirectory()) out.push(...findPdfs(p));
+              else if (entry.name.toLowerCase().endsWith('.pdf')) out.push(p);
+            }
+            return out;
+          };
+
+          const pdfFiles = findPdfs(extractDir).sort((a, b) => {
+            const baseA = path.basename(a);
+            const baseB = path.basename(b);
+            const chA = baseA.match(/^Chapter\s+(\d+)/i);
+            const chB = baseB.match(/^Chapter\s+(\d+)/i);
+            if (chA && chB) return Number(chA[1]) - Number(chB[1]);
+            if (chA) return -1;
+            if (chB) return 1;
+            return baseA.localeCompare(baseB);
+          });
+
+          const startedAt = new Date().toISOString();
+          let globalPage = 0;
+          let extractedTextPageCount = 0;
+          let blankPageCount = 0;
+          let totalCharacters = 0;
+          const chapters: any[] = [];
+          const structuredChapters: any[] = [];
+          const structuredTables: any[] = [];
+
+          for (let idx = 0; idx < pdfFiles.length; idx++) {
+            const fileFullPath = pdfFiles[idx];
+            const baseName = path.basename(fileFullPath);
+            const fileBuf = fs.readFileSync(fileFullPath);
+            const ab = fileBuf.buffer.slice(
+              fileBuf.byteOffset,
+              fileBuf.byteOffset + fileBuf.byteLength
+            ) as ArrayBuffer;
+            const chRec = await parsePdfBufferToFullBookRecord({
+              pdfBytes: ab,
+              bookId: target.bookId,
+              driveFileId: target.driveFileId,
+              fileName: baseName,
+              sourceFileName: baseName,
+              displayTitle: baseName,
+              sourceType: 'google_drive_pdf',
+              batchSize: 500,
+              resumeFromCheckpoint: false,
+              forceReprocess: true
+            });
+            const pageStart = globalPage + 1;
+            const pageEnd = globalPage + chRec.totalPages;
+            globalPage += chRec.totalPages;
+            extractedTextPageCount += chRec.extractedTextPageCount ?? 0;
+            blankPageCount += chRec.blankPageCount ?? 0;
+            totalCharacters += chRec.totalCharacters;
+            const cleanTitle = baseName.replace(/\.pdf$/i, '').replace(/_/g, ':');
+            const chId = `${target.bookId}-ch-${idx + 1}`;
+            const chSections = chRec.chapters.flatMap(c => c.sections || []).map((s, sIdx) => {
+              const globalPageNum = pageStart + sIdx;
+              return {
+                ...s,
+                id: `${chId}-sec-${sIdx + 1}`,
+                number: `p.${globalPageNum}`,
+                originalPageNumber: globalPageNum
+              };
+            });
+            chapters.push({
+              id: chId,
+              bookId: target.bookId,
+              parentChapterId: null,
+              hierarchyLevel: 1,
+              chapterNumber: idx + 1,
+              startPage: pageStart,
+              endPage: pageEnd,
+              title: cleanTitle,
+              titleAr: `الفصل ${idx + 1}: ${cleanTitle} (الصفحات ${pageStart}–${pageEnd})`,
+              authors: target.displayTitle,
+              edition: `Imported PDF (${pageEnd} Pages)`,
+              pageRange: `pp. ${pageStart}–${pageEnd}`,
+              systemCategory: 'Clinical Methodology & PPCP',
+              systemCategoryAr: 'المنهجية السريرية والحالات المرضية',
+              sourceUrl: `local://ref/chapter/${chId}`,
+              learningObjectives: [
+                `Direct verbatim extraction of ${cleanTitle} (pages ${pageStart}–${pageEnd}).`
+              ],
+              toc: chSections.map(s => ({
+                id: s.id,
+                number: s.number,
+                title: s.heading,
+                hierarchyLevel: 1,
+                pageNumber: s.originalPageNumber
+              })),
+              sections: chSections,
+              quickTables: [],
+              boardPearls: [`Source File: ${baseName} • Pages ${pageStart}–${pageEnd}.`],
+              boardPearlsAr: [`المصدر الأصلي: ${baseName} • الصفحات ${pageStart}–${pageEnd}.`],
+              keywords: [cleanTitle.toLowerCase(), `page ${pageStart}`],
+              citation: `${target.sourceFileName}. ${cleanTitle}, Pages ${pageStart}–${pageEnd}. Source ID: [${target.driveFileId}].`,
+              isVerbatimSource: true
+            });
+            structuredChapters.push({
+              id: chId,
+              bookId: target.bookId,
+              parentChapterId: null,
+              chapterNumber: idx + 1,
+              title: cleanTitle,
+              titleAr: `الفصل ${idx + 1}: ${cleanTitle}`,
+              startPage: pageStart,
+              endPage: pageEnd,
+              hierarchyLevel: 1
+            });
+            for (const tbl of chRec.structuredTables || []) {
+              if (structuredTables.length < 350) {
+                structuredTables.push({
+                  ...tbl,
+                  id: `tbl-${target.bookId}-${pageStart}-${structuredTables.length + 1}`,
+                  chapterId: chId,
+                  pageNumber: pageStart + (tbl.pageNumber || 1) - 1
+                });
+              }
+            }
+          }
+
+          fs.rmSync(extractDir, { recursive: true, force: true });
+          fs.rmSync(zipPath, { force: true });
+
+          const sha256 = crypto.createHash('sha256').update(zipBuffer).digest('hex');
+          const completedAt = new Date().toISOString();
+          compactRecord = {
+            bookId: target.bookId,
+            driveFileId: target.driveFileId,
+            fileName: target.sourceFileName,
+            sourceFileName: target.sourceFileName,
+            displayTitle: target.displayTitle,
+            fileSize: zipBuffer.length,
+            originalFileSize: zipBuffer.length,
+            sha256,
+            totalPages: globalPage,
+            originalPageCount: globalPage,
+            processedPageCount: globalPage,
+            extractedTextPageCount,
+            ocrPageCount: 0,
+            unprocessedPageCount: 0,
+            blankPageCount,
+            totalChapters: chapters.length,
+            totalCharacters,
+            emptyTextPagesCount: blankPageCount,
+            sourceType: 'google_drive_pdf',
+            processingStatus: 'verified_complete',
+            processingVersion: '2.0.0',
+            syncedAt: completedAt,
+            createdAt: startedAt,
+            updatedAt: completedAt,
+            chapters,
+            pages: [],
+            structuredChapters,
+            structuredSections: [],
+            structuredTables
+          };
+        } else if (target.knownTotalPages > 2000) {
           compactRecord = await indexLargePdfWithGhostscript({
             pdfPath,
             bookId: target.bookId,
