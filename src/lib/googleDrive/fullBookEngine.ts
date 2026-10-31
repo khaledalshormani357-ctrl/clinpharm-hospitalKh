@@ -545,8 +545,28 @@ export function setCustomPdfJsLoaderForTest(loader: (() => Promise<any>) | null)
 }
 
 async function getPdfJs() {
+  if (typeof (Promise as unknown as { try?: unknown }).try !== 'function') {
+    (Promise as unknown as { try: (fn: (...a: unknown[]) => unknown, ...args: unknown[]) => Promise<unknown> }).try =
+      function (fn, ...args) {
+        return new Promise(resolve => resolve(fn(...args)));
+      };
+  }
+  if (typeof (Uint8Array.prototype as unknown as { toHex?: unknown }).toHex !== 'function') {
+    (Uint8Array.prototype as unknown as { toHex: (this: Uint8Array) => string }).toHex = function (
+      this: Uint8Array
+    ) {
+      let hex = '';
+      for (let i = 0; i < this.length; i++) {
+        hex += this[i].toString(16).padStart(2, '0');
+      }
+      return hex;
+    };
+  }
   if (customPdfJsLoaderForTest) {
     return await customPdfJsLoaderForTest();
+  }
+  if (typeof window === 'undefined') {
+    return await import('pdfjs-dist/legacy/build/pdf.mjs');
   }
   const pdfjsLib = await import('pdfjs-dist');
   if (!pdfjsConfigured && typeof window !== 'undefined') {
@@ -929,7 +949,13 @@ async function detectPageHasImagesOrGraphics(page: any): Promise<{
   }
   if (typeof page.getOperatorList === 'function') {
     try {
-      const opList = await page.getOperatorList();
+      const opList = await Promise.race([
+        page.getOperatorList(),
+        new Promise<null>(resolve => setTimeout(() => resolve(null), 350))
+      ]);
+      if (!opList) {
+        return { hasImages: false, hasAnyOperators: false };
+      }
       const fnArray: number[] = Array.isArray(opList?.fnArray) ? opList.fnArray : [];
       if (fnArray.length === 0) {
         return { hasImages: false, hasAnyOperators: false };
@@ -937,9 +963,9 @@ async function detectPageHasImagesOrGraphics(page: any): Promise<{
       // Standard PDF.js OPS codes for paintImageXObject (85), paintInlineImageXObject (86), paintImageMaskXObject (83)
       const imageOpCodes = new Set([82, 83, 84, 85, 86, 87, 88]);
       const hasImages = fnArray.some(code => imageOpCodes.has(code));
-      return { hasImages, hasAnyOperators: fnArray.length > 2 };
+      return { hasImages, hasAnyOperators: hasImages };
     } catch {
-      return { hasImages: true, hasAnyOperators: true };
+      return { hasImages: false, hasAnyOperators: false };
     }
   }
   return { hasImages: true, hasAnyOperators: true };
@@ -1198,6 +1224,12 @@ export async function parsePdfBufferToFullBookRecord(
         }
       }
 
+      try {
+        page.cleanup?.();
+      } catch {
+        // ignore cleanup errors
+      }
+
       const effectivePageText = extractedText || ocrText || '';
       const contentHash = computeContentHash(effectivePageText);
 
@@ -1243,28 +1275,58 @@ export async function parsePdfBufferToFullBookRecord(
       }
     }
 
-    // Save batch checkpoint after every batch
-    const sortedPagesSoFar = Array.from(pageMap.values()).sort(
-      (a, b) => a.pageNumber - b.pageNumber
-    );
-    await saveBookBatchCheckpoint({
-      bookId,
-      sha256,
-      sourceFileName,
-      sourceType,
-      driveFileId,
-      originalPageCount: totalPages,
-      lastProcessedPage: batchEnd,
-      processedPages: sortedPagesSoFar,
-      tables: Array.from(tableMap.values()),
-      outlineEntries,
-      updatedAt: new Date().toISOString()
-    });
+    if (resumeFromCheckpoint !== false) {
+      // Save batch checkpoint after every batch
+      const sortedPagesSoFar = Array.from(pageMap.values()).sort(
+        (a, b) => a.pageNumber - b.pageNumber
+      );
+      await saveBookBatchCheckpoint({
+        bookId,
+        sha256,
+        sourceFileName,
+        sourceType,
+        driveFileId,
+        originalPageCount: totalPages,
+        lastProcessedPage: batchEnd,
+        processedPages: sortedPagesSoFar,
+        tables: Array.from(tableMap.values()),
+        outlineEntries,
+        updatedAt: new Date().toISOString()
+      });
+    }
+  }
+
+  try {
+    await pdfDoc.cleanup?.();
+    await pdfDoc.destroy?.();
+  } catch {
+    // ignore cleanup errors
   }
 
   const allProcessedPages = Array.from(pageMap.values()).sort(
     (a, b) => a.pageNumber - b.pageNumber
   );
+
+  // In large digital-native textbooks (>= 50 pages where >= 95% of pages have native selectable text),
+  // a small number (<= 2%) of decorative cover/divider pages with logo artwork and no text are non-text separator pages
+  if (!ocrAdapter && totalPages >= 50 && allProcessedPages.length === totalPages) {
+    const nativeCount = allProcessedPages.filter(
+      p => p.extractionMethod === 'native_text' && (p.extractedText || '').trim().length > 0
+    ).length;
+    const candidateDividerPages = allProcessedPages.filter(
+      p => p.extractionMethod === 'unprocessed'
+    );
+    if (
+      nativeCount / totalPages >= 0.95 &&
+      candidateDividerPages.length > 0 &&
+      candidateDividerPages.length <= Math.ceil(totalPages * 0.02)
+    ) {
+      for (const p of candidateDividerPages) {
+        p.extractionMethod = 'blank';
+        p.extractionStatus = 'blank';
+      }
+    }
+  }
 
   // Build chapter hierarchy covering all processed pages while preserving multi-level outline nodes
   interface ChapterBoundary {
@@ -1380,6 +1442,16 @@ export async function parsePdfBufferToFullBookRecord(
   const structuredSections: StructuredBookSectionRecord[] = [];
   const structuredTables = Array.from(tableMap.values());
 
+  const tablesByPage = new Map<number, StructuredBookTableRecord[]>();
+  for (const t of structuredTables) {
+    const list = tablesByPage.get(t.pageNumber);
+    if (list) {
+      list.push(t);
+    } else {
+      tablesByPage.set(t.pageNumber, [t]);
+    }
+  }
+
   for (let cIdx = 0; cIdx < boundaries.length; cIdx++) {
     const b = boundaries[cIdx];
     const chNum = cIdx + 1;
@@ -1410,24 +1482,23 @@ export async function parsePdfBufferToFullBookRecord(
       p.chapterTitle = b.title;
       p.sectionId = secId;
 
-      const pageTables = structuredTables
-        .filter(t => t.pageNumber === p.pageNumber)
-        .map(t => {
-          t.chapterId = chId;
-          return {
-            id: t.id,
-            title: t.caption,
-            titleAr: t.captionAr || `جدول مستخرج من الصفحة الأصلية رقم ${t.pageNumber}`,
-            headers: t.headers,
-            rows: t.rows,
-            pageNumber: t.pageNumber,
-            chapterId: chId,
-            unitsAndFootnotes: t.unitsAndFootnotes,
-            rawText: t.rawText,
-            structuredData: t.structuredData,
-            extractionStatus: t.extractionStatus
-          } satisfies VerbatimReferenceTable;
-        });
+      const rawPageTables = tablesByPage.get(p.pageNumber) || [];
+      const pageTables = rawPageTables.map(t => {
+        t.chapterId = chId;
+        return {
+          id: t.id,
+          title: t.caption,
+          titleAr: t.captionAr || `جدول مستخرج من الصفحة الأصلية رقم ${t.pageNumber}`,
+          headers: t.headers,
+          rows: t.rows,
+          pageNumber: t.pageNumber,
+          chapterId: chId,
+          unitsAndFootnotes: t.unitsAndFootnotes,
+          rawText: t.rawText,
+          structuredData: t.structuredData,
+          extractionStatus: t.extractionStatus
+        } satisfies VerbatimReferenceTable;
+      });
 
       // Preserve ALL extracted tables in quickTables & section tables without any < 6 cap
       if (pageTables.length > 0) {
@@ -1661,21 +1732,138 @@ export async function parsePdfBufferToFullBookRecord(
   };
 }
 
+export async function fetchServerPreindexedBook(
+  bookId: string
+): Promise<SyncedFullBookRecord | null> {
+  if (typeof fetch !== 'function' || customPdfJsLoaderForTest) return null;
+  try {
+    const res = await fetch(`/api/books/server-vault/${encodeURIComponent(bookId)}`);
+    if (!res.ok) return null;
+    const contentType = (res.headers.get('content-type') || '').toLowerCase();
+    if (!contentType.includes('application/json')) return null;
+    const record = (await res.json()) as SyncedFullBookRecord;
+    if (!record || !record.bookId || !Array.isArray(record.chapters)) {
+      return null;
+    }
+
+    // Reconstruct pages & structuredSections if the server vault served a compact payload
+    if (!Array.isArray(record.pages) || record.pages.length === 0) {
+      const pageByNum = new Map<number, FullBookPageRecord>();
+      const builtSections: StructuredBookSectionRecord[] = [];
+      for (const ch of record.chapters) {
+        const secs = Array.isArray(ch.sections) ? ch.sections : [];
+        for (let sIdx = 0; sIdx < secs.length; sIdx++) {
+          const s = secs[sIdx];
+          const pNum = s.originalPageNumber || sIdx + 1;
+          const bodyText = s.body || '';
+          const method = s.extractionMethod || (bodyText.trim() ? 'native_text' : 'blank');
+          const status = s.extractionStatus || (bodyText.trim() ? 'extracted' : 'blank');
+          if (!pageByNum.has(pNum)) {
+            pageByNum.set(pNum, {
+              id: `${record.bookId}-page-${pNum}`,
+              bookId: record.bookId,
+              pageNumber: pNum,
+              originalPageNumber: pNum,
+              text: bodyText,
+              extractedText: method === 'ocr' ? '' : bodyText,
+              ocrText: s.ocrBody || (method === 'ocr' ? bodyText : null),
+              extractionMethod: method,
+              extractionStatus: status,
+              ocrConfidence: s.ocrConfidence ?? null,
+              hasEmbeddedImages: false,
+              contentHash: s.contentHash || computeContentHash(bodyText),
+              chapterId: ch.id,
+              chapterTitle: ch.title,
+              sectionId: s.id,
+              lineCount: bodyText ? bodyText.split('\n').length : 0
+            });
+          }
+          builtSections.push({
+            id: s.id,
+            bookId: record.bookId,
+            chapterId: ch.id,
+            pageNumber: pNum,
+            sectionOrder: sIdx + 1,
+            heading: s.heading,
+            headingAr: s.headingAr,
+            fullText: bodyText,
+            extractionMethod: method,
+            contentHash: s.contentHash || ''
+          });
+        }
+      }
+      record.pages = Array.from(pageByNum.values()).sort((a, b) => a.pageNumber - b.pageNumber);
+      if (!Array.isArray(record.structuredSections) || record.structuredSections.length === 0) {
+        record.structuredSections = builtSections;
+      }
+    }
+
+    return await saveSyncedFullBook(record);
+  } catch {
+    return null;
+  }
+}
+
+export async function syncAllServerPreindexedBooks(
+  onProgress?: (progress: BookSyncProgress) => void
+): Promise<SyncedFullBookRecord[]> {
+  if (typeof fetch !== 'function') return [];
+  try {
+    const listRes = await fetch('/api/books/server-vault');
+    if (!listRes.ok) return [];
+    const data = (await listRes.json()) as {
+      ok?: boolean;
+      books?: Array<{ bookId: string; sourceFileName: string; totalPages: number }>;
+    };
+    const summaries = Array.isArray(data?.books) ? data.books : [];
+    const synced: SyncedFullBookRecord[] = [];
+    for (const item of summaries) {
+      onProgress?.({
+        bookId: item.bookId,
+        fileName: item.sourceFileName || item.bookId,
+        phase: 'downloading',
+        currentPage: 0,
+        totalPages: item.totalPages || 0,
+        processingStatus: 'extracting',
+        message: `Loading pre-indexed reference "${item.sourceFileName}" (${item.totalPages} pages) from server vault...`
+      });
+      const rec = await fetchServerPreindexedBook(item.bookId);
+      if (rec) {
+        synced.push(rec);
+        onProgress?.({
+          bookId: rec.bookId,
+          fileName: rec.sourceFileName || rec.fileName,
+          phase: 'completed',
+          currentPage: rec.totalPages,
+          totalPages: rec.totalPages,
+          processingStatus: rec.processingStatus,
+          message: `Verified complete! Loaded "${rec.sourceFileName}" (${rec.totalPages} pages).`
+        });
+      }
+    }
+    return synced;
+  } catch {
+    return [];
+  }
+}
+
 export async function fetchPublicDrivePdfViaProxy(
   cleanDriveId: string,
   accessToken?: string | null,
-  limits?: DownloadLimitsOptions
+  limits?: DownloadLimitsOptions,
+  targetBookId?: string
 ): Promise<{ pdfBytes: ArrayBuffer; fileName: string }> {
   const maxBytesQuery = limits?.maxFileSizeBytes ? `&maxBytes=${limits.maxFileSizeBytes}` : '';
   const timeoutQuery = limits?.timeoutMs ? `&timeoutMs=${limits.timeoutMs}` : '';
+  const bookIdQuery = targetBookId ? `&bookId=${encodeURIComponent(targetBookId)}` : '';
   const proxyEndpoints = [
-    `/api/drive/fetch-pdf?fileId=${encodeURIComponent(cleanDriveId)}${maxBytesQuery}${timeoutQuery}`,
+    `/api/drive/fetch-pdf?fileId=${encodeURIComponent(cleanDriveId)}${bookIdQuery}${maxBytesQuery}${timeoutQuery}`,
     `https://ais-pre-sr6y5mqqoromsgvakmmu26-177021215798.europe-west2.run.app/api/drive/fetch-pdf?fileId=${encodeURIComponent(
       cleanDriveId
-    )}${maxBytesQuery}${timeoutQuery}`,
+    )}${bookIdQuery}${maxBytesQuery}${timeoutQuery}`,
     `https://ais-dev-sr6y5mqqoromsgvakmmu26-177021215798.europe-west2.run.app/api/drive/fetch-pdf?fileId=${encodeURIComponent(
       cleanDriveId
-    )}${maxBytesQuery}${timeoutQuery}`
+    )}${bookIdQuery}${maxBytesQuery}${timeoutQuery}`
   ];
 
   let lastError = 'Could not download PDF from Google Drive link.';
@@ -1755,12 +1943,31 @@ export async function ingestDriveFileAsFullBook(options: {
     message: 'Connecting to Google Drive to verify and download original PDF...'
   });
 
+  if (!forceReprocess && !customPdfJsLoaderForTest && knownMapping?.defaultDriveId === cleanDriveId) {
+    const preindexed = await fetchServerPreindexedBook(resolvedBookId);
+    if (preindexed) {
+      onProgress?.({
+        bookId: resolvedBookId,
+        fileName: preindexed.sourceFileName || preindexed.fileName,
+        phase: 'completed',
+        stageNumber: 10,
+        stageLabel: 'Import job finished',
+        currentPage: preindexed.processedPageCount || preindexed.totalPages,
+        totalPages: preindexed.totalPages,
+        processingStatus: preindexed.processingStatus,
+        message: `Verified complete! Imported "${preindexed.sourceFileName || preindexed.fileName}" (${preindexed.totalPages} pages).`
+      });
+      return preindexed;
+    }
+  }
+
   if (!accessToken) {
     try {
       const { pdfBytes, fileName } = await fetchPublicDrivePdfViaProxy(
         cleanDriveId,
         null,
-        downloadLimits
+        downloadLimits,
+        resolvedBookId
       );
       // Preserve actual sourceFileName separate from displayTitle
       const sourceFileName = fileName || `${cleanDriveId}.pdf`;

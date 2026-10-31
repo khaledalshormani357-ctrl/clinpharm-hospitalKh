@@ -12,7 +12,8 @@ import {
   KNOWN_DRIVE_BOOK_MAPPINGS,
   ingestDriveFileAsFullBook,
   ingestLocalPdfFileAsFullBook,
-  listUserDriveFiles
+  listUserDriveFiles,
+  syncAllServerPreindexedBooks
 } from '../../lib/googleDrive/fullBookEngine';
 import {
   BookImportJobRecord,
@@ -353,6 +354,38 @@ export function GoogleDriveBookSyncModal({
     }
   };
 
+  const handleSyncFromServerVault = async () => {
+    setErrorMessage(null);
+    setSuccessMessage(null);
+    try {
+      const records = await syncAllServerPreindexedBooks(p => setActiveProgress(p));
+      setActiveProgress(null);
+      await refreshVaultDiagnostics();
+      for (const rec of records) {
+        onBookSynced?.(rec);
+      }
+      if (records.length > 0) {
+        const totalPagesLoaded = records.reduce((s, r) => s + (r.totalPages || 0), 0);
+        setSuccessMessage(
+          lang === 'ar'
+            ? `تم تحميل وتفعيل ${records.length} مراجع طبية أصلية كاملة (${totalPagesLoaded.toLocaleString()} صفحة حقيقية • verified_complete) مباشرةً من خزنة الخادم!`
+            : `Loaded and verified ${records.length} complete original medical textbooks (${totalPagesLoaded.toLocaleString()} real pages • verified_complete) directly from the server vault!`
+        );
+      } else {
+        setErrorMessage(
+          lang === 'ar'
+            ? 'جاري تجهيز المراجع على الخادم، يرجى المحاولة بعد لحظات.'
+            : 'Server vault is currently preparing the references, please try again shortly.'
+        );
+      }
+    } catch (err: unknown) {
+      setActiveProgress(null);
+      setErrorMessage(
+        err instanceof Error ? err.message : 'Failed to load books from server vault.'
+      );
+    }
+  };
+
   const handleLocalFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -619,29 +652,45 @@ export function GoogleDriveBookSyncModal({
                 </div>
               </div>
 
-              {!vaultDiag?.isPersistentStorageGranted ? (
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => void handleEnablePersistentStorage()}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-teal-500/20 hover:bg-teal-500/30 text-teal-200 border border-teal-400/40 text-xs font-bold cursor-pointer"
+                  onClick={() => void handleSyncFromServerVault()}
+                  disabled={Boolean(activeProgress)}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 text-xs font-black cursor-pointer shadow-lg shadow-emerald-950/40"
                 >
-                  <ShieldCheck className="w-4 h-4 text-teal-300" />
+                  <CloudDownload className="w-4 h-4" />
                   <span>
                     {lang === 'ar'
-                      ? 'تفعيل التخزين الدائم غير القابل للمسح'
-                      : 'Lock Persistent Offline Storage'}
+                      ? 'تحميل كافة المراجع الأصلية الكاملة من الخادم (8,184 صفحة)'
+                      : 'Load All Pre-Indexed Original PDFs from Server (8,184 Pages)'}
                   </span>
                 </button>
-              ) : (
-                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-xs font-bold">
-                  <ShieldCheck className="w-4 h-4" />
-                  <span>
-                    {lang === 'ar'
-                      ? 'التخزين الدائم محمي ومُفعّل'
-                      : 'Persistent Offline Storage Protected'}
+
+                {!vaultDiag?.isPersistentStorageGranted ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleEnablePersistentStorage()}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-teal-500/20 hover:bg-teal-500/30 text-teal-200 border border-teal-400/40 text-xs font-bold cursor-pointer"
+                  >
+                    <ShieldCheck className="w-4 h-4 text-teal-300" />
+                    <span>
+                      {lang === 'ar'
+                        ? 'تفعيل التخزين الدائم غير القابل للمسح'
+                        : 'Lock Persistent Offline Storage'}
+                    </span>
+                  </button>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-xs font-bold">
+                    <ShieldCheck className="w-4 h-4" />
+                    <span>
+                      {lang === 'ar'
+                        ? 'التخزين الدائم محمي ومُفعّل'
+                        : 'Persistent Offline Storage Protected'}
+                    </span>
                   </span>
-                </span>
-              )}
+                )}
+              </div>
             </div>
 
             {vaultDiag && (
