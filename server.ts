@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import express from 'express';
 import fs from 'fs';
 import path from 'path';
+import zlib from 'zlib';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
@@ -462,11 +463,20 @@ ${verbatimLibraryContext || 'All 7 reference books (47 chapters) indexed.'}`;
     }
   });
 
-  // Serve list of pre-indexed full medical textbooks stored in the server vault (/tmp/clinpharm-books-vault)
+  // Serve list of pre-indexed full medical textbooks stored in the server vault (/tmp/clinpharm-books-vault or public/books-vault)
   app.get('/api/books/server-vault', (_req, res) => {
     try {
+      const bundledIndexPath = path.join(__dirname, 'public', 'books-vault', 'index.json');
       if (fs.existsSync(VAULT_INDEX_PATH)) {
         const indexRaw = fs.readFileSync(VAULT_INDEX_PATH, 'utf8');
+        const parsed = JSON.parse(indexRaw) as VaultBookSummary[];
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          res.json({ ok: true, books: parsed });
+          return;
+        }
+      }
+      if (fs.existsSync(bundledIndexPath)) {
+        const indexRaw = fs.readFileSync(bundledIndexPath, 'utf8');
         const parsed = JSON.parse(indexRaw) as VaultBookSummary[];
         if (Array.isArray(parsed) && parsed.length > 0) {
           res.json({ ok: true, books: parsed });
@@ -518,14 +528,23 @@ ${verbatimLibraryContext || 'All 7 reference books (47 chapters) indexed.'}`;
     try {
       const bookId = String(req.params.bookId || '').replace(/[^a-zA-Z0-9_-]/g, '');
       const recordPath = path.join(VAULT_RECORDS_DIR, `${bookId}.json`);
-      if (!bookId || !fs.existsSync(recordPath)) {
-        res.status(404).json({ ok: false, error: `Pre-indexed book "${bookId}" not found in server vault.` });
+      const bundledPackPath = path.join(__dirname, 'public', 'books-vault', `${bookId}.pack`);
+      if (bookId && fs.existsSync(recordPath)) {
+        const stat = fs.statSync(recordPath);
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.setHeader('Content-Length', String(stat.size));
+        fs.createReadStream(recordPath).pipe(res);
         return;
       }
-      const stat = fs.statSync(recordPath);
-      res.setHeader('Content-Type', 'application/json; charset=utf-8');
-      res.setHeader('Content-Length', String(stat.size));
-      fs.createReadStream(recordPath).pipe(res);
+      if (bookId && fs.existsSync(bundledPackPath)) {
+        const gzBuf = fs.readFileSync(bundledPackPath);
+        const jsonBuf = zlib.gunzipSync(gzBuf);
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.setHeader('Content-Length', String(jsonBuf.length));
+        res.send(jsonBuf);
+        return;
+      }
+      res.status(404).json({ ok: false, error: `Pre-indexed book "${bookId}" not found in server vault.` });
     } catch (err: unknown) {
       res.status(500).json({
         ok: false,

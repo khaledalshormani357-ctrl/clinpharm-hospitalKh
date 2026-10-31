@@ -662,8 +662,8 @@ export function GoogleDriveBookSyncModal({
                   <CloudDownload className="w-4 h-4" />
                   <span>
                     {lang === 'ar'
-                      ? 'تحميل كافة المراجع الأصلية الكاملة من الخادم (8,184 صفحة)'
-                      : 'Load All Pre-Indexed Original PDFs from Server (8,184 Pages)'}
+                      ? 'تحميل كافة المراجع الأصلية الكاملة (6 مراجع • 9,945 صفحة)'
+                      : 'Load All Pre-Indexed Original PDFs (6 Books • 9,945 Pages)'}
                   </span>
                 </button>
 

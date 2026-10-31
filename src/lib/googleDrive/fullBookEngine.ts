@@ -1732,20 +1732,113 @@ export async function parsePdfBufferToFullBookRecord(
   };
 }
 
+const GITHUB_RAW_VAULT_BASE =
+  'https://raw.githubusercontent.com/khaledalshormani357-ctrl/clinpharm-hospitalKh/main/public/books-vault';
+
+const DEFAULT_PREINDEXED_VAULT_SUMMARIES: Array<{
+  bookId: string;
+  sourceFileName: string;
+  totalPages: number;
+}> = [
+  {
+    bookId: 'accp-2026-vol1',
+    sourceFileName: '2026_Pharmacotherapy_Prep_Vol_1.pdf',
+    totalPages: 648
+  },
+  {
+    bookId: 'accp-2026-vol2',
+    sourceFileName: '2026_Pharmacotherapy_Prep_Vol_2.pdf',
+    totalPages: 626
+  },
+  {
+    bookId: 'accp-cardiology-2026',
+    sourceFileName: 'ACCP_2026_Cardiology_Pharmacy_Prep.pdf',
+    totalPages: 878
+  },
+  {
+    bookId: 'dipiro-13th-ed',
+    sourceFileName: 'DiPiro_Pharmacotherapy_13th_Ed.pdf',
+    totalPages: 6032
+  },
+  {
+    bookId: 'stockleys-drug-interactions',
+    sourceFileName: 'Stockleys_Drug_Interactions_Pocket_Companion.pdf',
+    totalPages: 717
+  },
+  {
+    bookId: 'clinical-casebook-guide',
+    sourceFileName: 'Schwinghammer_Pharmacotherapy_Casebook_13th_Ed.pdf',
+    totalPages: 1044
+  }
+];
+
+async function decodeVaultRecordResponse(res: Response): Promise<SyncedFullBookRecord | null> {
+  try {
+    const contentType = (res.headers.get('content-type') || '').toLowerCase();
+    if (contentType.includes('text/html')) return null;
+
+    const buf = await res.arrayBuffer();
+    if (!buf || buf.byteLength < 64) return null;
+    const bytes = new Uint8Array(buf);
+
+    let jsonText = '';
+    // Check GZIP magic header (0x1f 0x8b)
+    if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
+      if (typeof DecompressionStream !== 'undefined') {
+        const decompressedStream = new Blob([buf])
+          .stream()
+          .pipeThrough(new DecompressionStream('gzip'));
+        jsonText = await new Response(decompressedStream).text();
+      } else {
+        return null;
+      }
+    } else {
+      jsonText = new TextDecoder('utf-8').decode(bytes);
+    }
+
+    const trimmed = jsonText.trim();
+    if (!trimmed.startsWith('{')) return null;
+    const parsed = JSON.parse(trimmed) as SyncedFullBookRecord;
+    if (!parsed || !parsed.bookId || !Array.isArray(parsed.chapters)) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchServerPreindexedBook(
   bookId: string
 ): Promise<SyncedFullBookRecord | null> {
   if (typeof fetch !== 'function' || customPdfJsLoaderForTest) return null;
-  try {
-    const res = await fetch(`/api/books/server-vault/${encodeURIComponent(bookId)}`);
-    if (!res.ok) return null;
-    const contentType = (res.headers.get('content-type') || '').toLowerCase();
-    if (!contentType.includes('application/json')) return null;
-    const record = (await res.json()) as SyncedFullBookRecord;
-    if (!record || !record.bookId || !Array.isArray(record.chapters)) {
-      return null;
-    }
 
+  const encodedId = encodeURIComponent(bookId);
+  const candidateUrls = [
+    `./books-vault/${encodedId}.pack`,
+    `/books-vault/${encodedId}.pack`,
+    `/api/books/server-vault/${encodedId}`,
+    `${GITHUB_RAW_VAULT_BASE}/${encodedId}.pack`
+  ];
+
+  let record: SyncedFullBookRecord | null = null;
+  for (const url of candidateUrls) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const decoded = await decodeVaultRecordResponse(res);
+      if (decoded && decoded.bookId === bookId) {
+        record = decoded;
+        break;
+      }
+    } catch {
+      // try next source
+    }
+  }
+
+  if (!record) return null;
+
+  try {
     // Reconstruct pages & structuredSections if the server vault served a compact payload
     if (!Array.isArray(record.pages) || record.pages.length === 0) {
       const pageByNum = new Map<number, FullBookPageRecord>();
@@ -1808,43 +1901,62 @@ export async function syncAllServerPreindexedBooks(
   onProgress?: (progress: BookSyncProgress) => void
 ): Promise<SyncedFullBookRecord[]> {
   if (typeof fetch !== 'function') return [];
-  try {
-    const listRes = await fetch('/api/books/server-vault');
-    if (!listRes.ok) return [];
-    const data = (await listRes.json()) as {
-      ok?: boolean;
-      books?: Array<{ bookId: string; sourceFileName: string; totalPages: number }>;
-    };
-    const summaries = Array.isArray(data?.books) ? data.books : [];
-    const synced: SyncedFullBookRecord[] = [];
-    for (const item of summaries) {
-      onProgress?.({
-        bookId: item.bookId,
-        fileName: item.sourceFileName || item.bookId,
-        phase: 'downloading',
-        currentPage: 0,
-        totalPages: item.totalPages || 0,
-        processingStatus: 'extracting',
-        message: `Loading pre-indexed reference "${item.sourceFileName}" (${item.totalPages} pages) from server vault...`
-      });
-      const rec = await fetchServerPreindexedBook(item.bookId);
-      if (rec) {
-        synced.push(rec);
-        onProgress?.({
-          bookId: rec.bookId,
-          fileName: rec.sourceFileName || rec.fileName,
-          phase: 'completed',
-          currentPage: rec.totalPages,
-          totalPages: rec.totalPages,
-          processingStatus: rec.processingStatus,
-          message: `Verified complete! Loaded "${rec.sourceFileName}" (${rec.totalPages} pages).`
-        });
+
+  let summaries: Array<{ bookId: string; sourceFileName: string; totalPages: number }> = [];
+  const indexUrls = [
+    './books-vault/index.json',
+    '/books-vault/index.json',
+    '/api/books/server-vault',
+    `${GITHUB_RAW_VAULT_BASE}/index.json`
+  ];
+
+  for (const url of indexUrls) {
+    try {
+      const listRes = await fetch(url);
+      if (!listRes.ok) continue;
+      const contentType = (listRes.headers.get('content-type') || '').toLowerCase();
+      if (contentType.includes('text/html')) continue;
+      const raw = await listRes.json();
+      const list = Array.isArray(raw) ? raw : Array.isArray(raw?.books) ? raw.books : [];
+      if (list.length > 0) {
+        summaries = list;
+        break;
       }
+    } catch {
+      // try next index source
     }
-    return synced;
-  } catch {
-    return [];
   }
+
+  if (summaries.length === 0) {
+    summaries = DEFAULT_PREINDEXED_VAULT_SUMMARIES;
+  }
+
+  const synced: SyncedFullBookRecord[] = [];
+  for (const item of summaries) {
+    onProgress?.({
+      bookId: item.bookId,
+      fileName: item.sourceFileName || item.bookId,
+      phase: 'downloading',
+      currentPage: 0,
+      totalPages: item.totalPages || 0,
+      processingStatus: 'extracting',
+      message: `Loading pre-indexed reference "${item.sourceFileName}" (${item.totalPages} pages) from vault...`
+    });
+    const rec = await fetchServerPreindexedBook(item.bookId);
+    if (rec) {
+      synced.push(rec);
+      onProgress?.({
+        bookId: rec.bookId,
+        fileName: rec.sourceFileName || rec.fileName,
+        phase: 'completed',
+        currentPage: rec.totalPages,
+        totalPages: rec.totalPages,
+        processingStatus: rec.processingStatus,
+        message: `Verified complete! Loaded "${rec.sourceFileName}" (${rec.totalPages} pages).`
+      });
+    }
+  }
+  return synced;
 }
 
 export async function fetchPublicDrivePdfViaProxy(
