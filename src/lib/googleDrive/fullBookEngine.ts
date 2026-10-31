@@ -1772,26 +1772,51 @@ const DEFAULT_PREINDEXED_VAULT_SUMMARIES: Array<{
   }
 ];
 
+const VAULT_REQUEST_TIMEOUT_MS = 120_000;
+const MAX_VAULT_PACK_BYTES = 300 * 1024 * 1024;
+
+async function consumeWithTimeout<T>(
+  url: string,
+  consume: (response: Response) => Promise<T>,
+  timeoutMs = VAULT_REQUEST_TIMEOUT_MS
+): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    return await consume(response);
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(`Server book download timed out after ${timeoutMs}ms: ${url}`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function decodeVaultRecordResponse(res: Response): Promise<SyncedFullBookRecord | null> {
   try {
     const contentType = (res.headers.get('content-type') || '').toLowerCase();
-    if (contentType.includes('text/html')) return null;
+    if (!res.ok || contentType.includes('text/html')) return null;
+    const declaredLength = Number(res.headers.get('content-length') || 0);
+    if (declaredLength > MAX_VAULT_PACK_BYTES) {
+      throw new Error(`Server book pack exceeds ${MAX_VAULT_PACK_BYTES} bytes.`);
+    }
 
     const buf = await res.arrayBuffer();
-    if (!buf || buf.byteLength < 64) return null;
+    if (!buf || buf.byteLength < 64 || buf.byteLength > MAX_VAULT_PACK_BYTES) return null;
     const bytes = new Uint8Array(buf);
 
     let jsonText = '';
-    // Check GZIP magic header (0x1f 0x8b)
     if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
-      if (typeof DecompressionStream !== 'undefined') {
-        const decompressedStream = new Blob([buf])
-          .stream()
-          .pipeThrough(new DecompressionStream('gzip'));
-        jsonText = await new Response(decompressedStream).text();
-      } else {
-        return null;
+      if (typeof DecompressionStream === 'undefined') {
+        throw new Error('This device does not support streaming GZIP decompression.');
       }
+      const decompressedStream = new Blob([buf])
+        .stream()
+        .pipeThrough(new DecompressionStream('gzip'));
+      jsonText = await new Response(decompressedStream).text();
     } else {
       jsonText = new TextDecoder('utf-8').decode(bytes);
     }
@@ -1799,11 +1824,9 @@ async function decodeVaultRecordResponse(res: Response): Promise<SyncedFullBookR
     const trimmed = jsonText.trim();
     if (!trimmed.startsWith('{')) return null;
     const parsed = JSON.parse(trimmed) as SyncedFullBookRecord;
-    if (!parsed || !parsed.bookId || !Array.isArray(parsed.chapters)) {
-      return null;
-    }
-    return parsed;
-  } catch {
+    return parsed && parsed.bookId && Array.isArray(parsed.chapters) ? parsed : null;
+  } catch (error) {
+    if (error instanceof Error && /exceeds|does not support/.test(error.message)) throw error;
     return null;
   }
 }
@@ -1824,9 +1847,11 @@ export async function fetchServerPreindexedBook(
   let record: SyncedFullBookRecord | null = null;
   for (const url of candidateUrls) {
     try {
-      const res = await fetch(url);
-      if (!res.ok) continue;
-      const decoded = await decodeVaultRecordResponse(res);
+      const decoded = await consumeWithTimeout(
+        url,
+        response => decodeVaultRecordResponse(response),
+        180_000
+      );
       if (decoded && decoded.bookId === bookId) {
         record = decoded;
         break;
@@ -1912,11 +1937,13 @@ export async function syncAllServerPreindexedBooks(
 
   for (const url of indexUrls) {
     try {
-      const listRes = await fetch(url);
-      if (!listRes.ok) continue;
-      const contentType = (listRes.headers.get('content-type') || '').toLowerCase();
-      if (contentType.includes('text/html')) continue;
-      const raw = await listRes.json();
+      const raw = await consumeWithTimeout(url, async listRes => {
+        if (!listRes.ok) return null;
+        const contentType = (listRes.headers.get('content-type') || '').toLowerCase();
+        if (contentType.includes('text/html')) return null;
+        return await listRes.json();
+      }, 45_000);
+      if (!raw) continue;
       const list = Array.isArray(raw) ? raw : Array.isArray(raw?.books) ? raw.books : [];
       if (list.length > 0) {
         summaries = list;
@@ -1932,29 +1959,57 @@ export async function syncAllServerPreindexedBooks(
   }
 
   const synced: SyncedFullBookRecord[] = [];
-  for (const item of summaries) {
-    onProgress?.({
-      bookId: item.bookId,
-      fileName: item.sourceFileName || item.bookId,
-      phase: 'downloading',
-      currentPage: 0,
-      totalPages: item.totalPages || 0,
-      processingStatus: 'extracting',
-      message: `Loading pre-indexed reference "${item.sourceFileName}" (${item.totalPages} pages) from vault...`
-    });
-    const rec = await fetchServerPreindexedBook(item.bookId);
-    if (rec) {
-      synced.push(rec);
+  // Limit concurrency to two large packs to avoid exhausting Android WebView memory.
+  for (let offset = 0; offset < summaries.length; offset += 2) {
+    const batch = summaries.slice(offset, offset + 2);
+    const batchResults = await Promise.all(batch.map(async item => {
       onProgress?.({
-        bookId: rec.bookId,
-        fileName: rec.sourceFileName || rec.fileName,
-        phase: 'completed',
-        currentPage: rec.totalPages,
-        totalPages: rec.totalPages,
-        processingStatus: rec.processingStatus,
-        message: `Verified complete! Loaded "${rec.sourceFileName}" (${rec.totalPages} pages).`
+        bookId: item.bookId,
+        fileName: item.sourceFileName || item.bookId,
+        phase: 'downloading',
+        currentPage: 0,
+        totalPages: item.totalPages || 0,
+        processingStatus: 'extracting',
+        message: `Downloading "${item.sourceFileName}" from server vault (request timeout: 3 minutes)...`
       });
-    }
+      try {
+        const rec = await fetchServerPreindexedBook(item.bookId);
+        if (rec) {
+          onProgress?.({
+            bookId: rec.bookId,
+            fileName: rec.sourceFileName || rec.fileName,
+            phase: 'completed',
+            currentPage: rec.totalPages,
+            totalPages: rec.totalPages,
+            processingStatus: rec.processingStatus,
+            message: `Verified complete! Loaded "${rec.sourceFileName}" (${rec.totalPages} pages).`
+          });
+        } else {
+          onProgress?.({
+            bookId: item.bookId,
+            fileName: item.sourceFileName || item.bookId,
+            phase: 'error',
+            currentPage: 0,
+            totalPages: item.totalPages || 0,
+            processingStatus: 'failed',
+            message: `Could not load "${item.sourceFileName || item.bookId}" from any configured server source.`
+          });
+        }
+        return rec;
+      } catch (error) {
+        onProgress?.({
+          bookId: item.bookId,
+          fileName: item.sourceFileName || item.bookId,
+          phase: 'error',
+          currentPage: 0,
+          totalPages: item.totalPages || 0,
+          processingStatus: 'failed',
+          message: error instanceof Error ? error.message : 'Unknown server download error.'
+        });
+        return null;
+      }
+    }));
+    synced.push(...batchResults.filter((record): record is SyncedFullBookRecord => Boolean(record)));
   }
   return synced;
 }
