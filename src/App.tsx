@@ -167,8 +167,17 @@ export default function App() {
               b.processingStatus === 'verified_complete' &&
               b.sourceType !== 'embedded_synthetic'
           ).length;
-          if (verifiedCount < 6) {
-            await syncAllServerPreindexedBooks();
+          const dipiro = current.find(b => b.bookId === 'dipiro-13th-ed');
+          const stockley = current.find(b => b.bookId === 'stockleys-drug-interactions');
+          const needsRefresh =
+            verifiedCount < 6 ||
+            !dipiro ||
+            (dipiro.totalCharacters || 0) < 5_000_000 ||
+            (dipiro.chapters?.[0]?.sections?.[0]?.body?.trim()?.length || 0) < 80 ||
+            !stockley ||
+            (stockley.chapters?.[0]?.sections?.[0]?.body?.trim()?.length || 0) < 80;
+          if (needsRefresh) {
+            await syncAllServerPreindexedBooks(undefined, { forceReload: true });
           }
         } catch {
           // ignore background vault sync errors

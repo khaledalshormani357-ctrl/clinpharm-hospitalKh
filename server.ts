@@ -97,6 +97,8 @@ interface CopilotChatRequestBody {
   patientContext?: string;
   referenceContext?: string;
   verbatimLibraryContext?: string;
+  preferredModel?: 'gemini-4-argon' | 'gemini-3.8-flash' | 'gemini-3.1-flash-lite';
+  rolePersona?: 'general_clinical' | 'icu_critical_care' | 'ddi_pk_specialist';
 }
 
 async function readLimitedBuffer(
@@ -257,7 +259,9 @@ export async function createApp(options?: { serveDistOnly?: boolean }) {
         history = [],
         patientContext = '',
         referenceContext = '',
-        verbatimLibraryContext = ''
+        verbatimLibraryContext = '',
+        preferredModel = 'gemini-3.8-flash',
+        rolePersona = 'general_clinical'
       } = (req.body || {}) as CopilotChatRequestBody;
 
       if (!query || !query.trim()) {
@@ -291,7 +295,20 @@ export async function createApp(options?: { serveDistOnly?: boolean }) {
         }
       });
 
+      const roleDirectives: Record<string, string> = {
+        general_clinical:
+          'ROLE PERSONA: Board-Certified Pharmacotherapy Specialist (BCPS) & Internal Medicine Clinical Pharmacist. Provide comprehensive organ-system assessment, guideline-directed therapy (GDMT), and renal/hepatic dose adjustments.',
+        icu_critical_care:
+          'ROLE PERSONA: Critical Care & Emergency Medicine Clinical Pharmacist (BCCCP). Prioritize hemodynamic stability, vasoactive infusion ceilings, high-alert IV electrolyte limits, sepsis resuscitation, and CRRT/IHD antimicrobial dosing.',
+        ddi_pk_specialist:
+          'ROLE PERSONA: Clinical Pharmacokinetics (TDM) & Stockley’s Drug Interaction Specialist. Focus on CYP450/P-gp/OATP mechanisms, washout intervals, QTc/serotonin toxicity risk, therapeutic drug monitoring (AUC24/MIC, Winter-Tozer), and actionable DDI management.'
+      };
+
+      const selectedRoleDirective =
+        roleDirectives[rolePersona] || roleDirectives.general_clinical;
+
       const systemInstruction = `You are "ClinPharm NotebookLM AI", a strict Source-Grounded Clinical Pharmacy Reference Analyst (modeled after Google NotebookLM) for board-certified hospital pharmacists (PharmD, BCPS, BCCCP, BCCP).
+${selectedRoleDirective}
 
 CRITICAL NOTEBOOK-AI GROUNDING RULES (ZERO HALLUCINATION POLICY):
 1. STRICT SOURCE GROUNDING ONLY: You MUST answer strictly and exclusively from the provided NUMBERED ACCREDITED REFERENCE SOURCES ([SOURCE 1], [SOURCE 2], ...), the MATCHED STOCKLEY'S DRUG INTERACTIONS MONOGRAPHS, and the ACTIVE INPATIENT CHART below. Do NOT invent, guess, or fabricate any drug doses, mechanisms, or references from outside the provided sources.
@@ -317,10 +334,10 @@ ${referenceContext || 'See numbered verbatim sources below.'}
 
 ========================================
 NUMBERED VERBATIM TEXTBOOK SOURCES ([SOURCE 1] .. [SOURCE N]):
-${verbatimLibraryContext || 'All 7 reference books (47 chapters) indexed.'}`;
+${verbatimLibraryContext || 'All 7 reference books indexed.'}`;
 
       const contents = [
-        ...history.slice(-4).map(turn => ({
+        ...history.slice(-12).map(turn => ({
           role: turn.role === 'assistant' ? 'model' : 'user',
           parts: [{ text: turn.text }]
         })),
@@ -330,29 +347,35 @@ ${verbatimLibraryContext || 'All 7 reference books (47 chapters) indexed.'}`;
         }
       ];
 
-      const candidateModels = [
-        'gemini-3-flash-preview',
-        'gemini-3.8-flash',
-        'gemini-3.1-flash-lite',
-        'gemini-flash-latest'
-      ];
+      const orderedModels = Array.from(
+        new Set([
+          preferredModel,
+          'gemini-3.8-flash',
+          'gemini-3.1-flash-lite',
+          'gemini-3-flash-preview',
+          'gemini-flash-latest'
+        ])
+      );
 
       let replyText = '';
-      let usedModel = candidateModels[0];
+      let usedModel = orderedModels[0];
 
-      for (const modelName of candidateModels) {
+      for (const modelName of orderedModels) {
         try {
-          const isGemini3 = modelName.startsWith('gemini-3');
+          const isGemini3Or4 =
+            modelName.startsWith('gemini-3') || modelName.startsWith('gemini-4');
           const response = await ai.models.generateContent({
             model: modelName,
             contents,
             config: {
               systemInstruction,
-              temperature: 0.1,
-              ...(isGemini3
+              ...(isGemini3Or4
                 ? {
                     thinkingConfig: {
-                      thinkingLevel: ThinkingLevel.LOW
+                      thinkingLevel:
+                        modelName === 'gemini-4-argon'
+                          ? ThinkingLevel.MEDIUM
+                          : ThinkingLevel.LOW
                     }
                   }
                 : {})
@@ -365,7 +388,10 @@ ${verbatimLibraryContext || 'All 7 reference books (47 chapters) indexed.'}`;
             break;
           }
         } catch (err) {
-          console.warn(`Model ${modelName} attempt failed, trying next:`, err instanceof Error ? err.message : err);
+          console.warn(
+            `Model ${modelName} attempt failed, trying next:`,
+            err instanceof Error ? err.message : err
+          );
         }
       }
 

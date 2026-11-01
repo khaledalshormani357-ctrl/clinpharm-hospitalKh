@@ -358,7 +358,9 @@ export function GoogleDriveBookSyncModal({
     setErrorMessage(null);
     setSuccessMessage(null);
     try {
-      const records = await syncAllServerPreindexedBooks(p => setActiveProgress(p));
+      const records = await syncAllServerPreindexedBooks(p => setActiveProgress(p), {
+        forceReload: true
+      });
       setActiveProgress(null);
       await refreshVaultDiagnostics();
       for (const rec of records) {
@@ -906,18 +908,21 @@ export function GoogleDriveBookSyncModal({
                             {syncedRecord.sourceFileName || syncedRecord.fileName}
                           </span>
                           <div className="flex items-center gap-1 shrink-0">
-                            {vaultBook?.hasBinaryPdf &&
-                              syncedRecord.sourceType !== 'embedded_synthetic' && (
-                                <button
-                                  type="button"
-                                  onClick={() => void handleDownloadOfflinePdf(mapping.bookId)}
-                                  className="px-1.5 py-0.5 rounded bg-teal-600 hover:bg-teal-500 text-white text-[10px] font-sans font-bold inline-flex items-center gap-1 cursor-pointer"
-                                  title="Download cached original PDF"
-                                >
-                                  <Download className="w-3 h-3" />
-                                  <span>PDF</span>
-                                </button>
-                              )}
+                            {syncedRecord.sourceType !== 'embedded_synthetic' && (
+                              <button
+                                type="button"
+                                onClick={() => void handleDownloadOfflinePdf(mapping.bookId)}
+                                className="px-1.5 py-0.5 rounded bg-teal-600 hover:bg-teal-500 text-white text-[10px] font-sans font-bold inline-flex items-center gap-1 cursor-pointer"
+                                title={
+                                  vaultBook?.hasBinaryPdf
+                                    ? 'Download cached original PDF'
+                                    : 'Download original PDF or full verbatim index'
+                                }
+                              >
+                                <Download className="w-3 h-3" />
+                                <span>{lang === 'ar' ? 'تنزيل' : 'PDF'}</span>
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={() => void handleVerifyIntegrity(mapping.bookId)}

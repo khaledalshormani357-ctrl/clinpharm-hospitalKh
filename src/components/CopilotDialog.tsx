@@ -116,6 +116,12 @@ Ask any clinical pharmacotherapy, renal/hepatic dosing, or Stockley’s DDI ques
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [liveAiStatus, setLiveAiStatus] = useState<'checking' | 'connected' | 'error'>('connected');
+  const [preferredModel, setPreferredModel] = useState<
+    'gemini-3.8-flash' | 'gemini-3.1-flash-lite' | 'gemini-4-argon'
+  >('gemini-3.8-flash');
+  const [rolePersona, setRolePersona] = useState<
+    'general_clinical' | 'icu_critical_care' | 'ddi_pk_specialist'
+  >('general_clinical');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -179,7 +185,7 @@ Ask any clinical pharmacotherapy, renal/hepatic dosing, or Stockley’s DDI ques
 
     const historyForApi = messages
       .filter(m => !m.isError)
-      .slice(-4)
+      .slice(-12)
       .map(m => ({
         role: m.sender,
         text: m.text
@@ -190,13 +196,15 @@ Ask any clinical pharmacotherapy, renal/hepatic dosing, or Stockley’s DDI ques
     setIsLoading(true);
 
     try {
-      // 1. Run NotebookLM Deep Multi-Token Bilingual Reference Retrieval across all 7 books (47+ chapters) & Stockley's DDI DB
+      // 1. Run NotebookLM Deep Multi-Token Bilingual Reference Retrieval across all 7 books & Stockley's DDI DB
       const groundingBundle = buildNotebookLmGrounding(currentInput, lang, currentPatient);
 
       const requestPayload = {
         query: currentInput,
         lang,
         history: historyForApi,
+        preferredModel,
+        rolePersona,
         patientContext: groundingBundle.patientContext,
         referenceContext: groundingBundle.referenceContext,
         verbatimLibraryContext: groundingBundle.notebookSourcesContext
@@ -211,7 +219,7 @@ Ask any clinical pharmacotherapy, renal/hepatic dosing, or Stockley’s DDI ques
       let replyText = '';
       let usedModelBadge = `NotebookLM Grounded AI • ${groundingBundle.numberedSources.length} Sources Cited`;
 
-      // 2. Try Server Endpoints (Fast <2.5s Gemini 3 Flash with ThinkingLevel.LOW)
+      // 2. Try Server Endpoints (All @google/genai SDK calls execute strictly on the server)
       for (const endpoint of candidateEndpoints) {
         try {
           const ctrl = new AbortController();
@@ -228,7 +236,6 @@ Ask any clinical pharmacotherapy, renal/hepatic dosing, or Stockley’s DDI ques
 
           const contentType = response.headers.get('content-type') || '';
           if (!contentType.includes('application/json')) {
-            // Static host (e.g. GitHub Pages 404.html or Capacitor local server) returned HTML; continue to next endpoint
             continue;
           }
 
@@ -240,71 +247,13 @@ Ask any clinical pharmacotherapy, renal/hepatic dosing, or Stockley’s DDI ques
             }
             break;
           }
-          // Try next endpoint if this one returned non-200
           continue;
         } catch {
-          // Endpoint timed out or unreachable, continue to next candidate
           continue;
         }
       }
 
-      // 3. Direct @google/genai SDK execution for standalone GitHub Pages / Android APK builds
-      if (!replyText && import.meta.env.VITE_GEMINI_API_KEY) {
-        const directModels = [
-          'gemini-3-flash-preview',
-          'gemini-3.8-flash',
-          'gemini-3.1-flash-lite',
-          'gemini-flash-latest'
-        ];
-
-        const sysPrompt = `You are "ClinPharm NotebookLM AI", a strict Source-Grounded Clinical Pharmacy Reference Analyst (modeled after Google NotebookLM).
-CRITICAL RULES:
-1. Answer ONLY from the provided NUMBERED ACCREDITED REFERENCE SOURCES ([SOURCE 1]..[SOURCE N]), MATCHED STOCKLEY'S DRUG INTERACTIONS, and ACTIVE INPATIENT CHART. Never make up or extrapolate unverified facts.
-2. Every clinical claim, drug dose, renal cutoff, or interaction mechanism MUST include an inline numbered citation like [1], [2], [Stockley's DDI].
-3. State exact numerical doses, infusion ceilings, washout periods, and TDM targets from the sources.
-4. End with a "${lang === 'ar' ? 'المراجع الموثّقة المقتبسة (Cited Reference Sources):' : 'Cited Reference Sources:'}" section listing [1], [2], ... with Book Title, Chapter, and Pages.
-5. Language: ${
-          lang === 'ar'
-            ? 'Respond in professional "Medical Mix" (Arabic clinical syntax with English drug names, enzymes, and medical terms).'
-            : 'Respond in authoritative clinical English.'
-        }`;
-
-        const fullPrompt = `ACTIVE INPATIENT CHART:\n${groundingBundle.patientContext}\n\nMATCHED STOCKLEY'S DDI:\n${groundingBundle.referenceContext}\n\nNUMBERED VERBATIM TEXTBOOK SOURCES:\n${groundingBundle.notebookSourcesContext}\n\nClinical Question:\n${currentInput}`;
-
-        for (const modelName of directModels) {
-          try {
-            const { GoogleGenAI, ThinkingLevel } = await import('@google/genai');
-            const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
-            const isGemini3 = modelName.startsWith('gemini-3');
-            const aiRes = await ai.models.generateContent({
-              model: modelName,
-              contents: fullPrompt,
-              config: {
-                systemInstruction: sysPrompt,
-                temperature: 0.1,
-                ...(isGemini3
-                  ? {
-                      thinkingConfig: {
-                        thinkingLevel: ThinkingLevel.LOW
-                      }
-                    }
-                  : {})
-              }
-            });
-            const text = aiRes.text?.trim() || '';
-            if (text) {
-              replyText = text;
-              usedModelBadge = `${modelName} • NotebookLM Direct (${groundingBundle.numberedSources.length} Sources)`;
-              break;
-            }
-          } catch {
-            // Try next model in direct SDK fallback chain
-            continue;
-          }
-        }
-      }
-
-      // 4. Offline Verbatim NotebookLM Reference Extractor (100% query-specific, strictly quotes matched [1]..[4] sources & tables, zero canned filler)
+      // 3. Offline Verbatim NotebookLM Reference Extractor (100% query-specific, strictly quotes matched [1]..[4] sources & tables)
       if (!replyText) {
         replyText = synthesizeGroundedNotebookAnswer(
           currentInput,
@@ -364,7 +313,7 @@ CRITICAL RULES:
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/60 backdrop-blur-xs animate-in fade-in">
       <div className="bg-white dark:bg-slate-900 rounded-t-3xl sm:rounded-3xl max-w-3xl w-full h-[92dvh] sm:h-[720px] shadow-2xl border border-teal-500/30 flex flex-col overflow-hidden">
         {/* Header with Android Drag Handle */}
-        <div className="bg-gradient-to-r from-teal-800 to-slate-900 text-white px-4 pt-2.5 pb-3.5 sm:p-4 border-b border-teal-500/30 shrink-0">
+        <div className="bg-gradient-to-r from-teal-800 to-slate-900 text-white px-4 pt-2.5 pb-3.5 sm:p-4 border-b border-teal-500/30 shrink-0 space-y-2.5">
           <div className="w-12 h-1.5 bg-white/30 rounded-full mx-auto mb-2 sm:hidden" />
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2.5 min-w-0">
@@ -426,6 +375,79 @@ CRITICAL RULES:
               >
                 <X className="w-5 h-5" />
               </button>
+            </div>
+          </div>
+
+          {/* Multi-Turn Clinical Role & Gemini Model Selector Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-white/10 text-[11px]">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-teal-200/80 font-bold">
+                {lang === 'ar' ? 'التخصص:' : 'Role:'}
+              </span>
+              {[
+                {
+                  id: 'general_clinical' as const,
+                  labelAr: 'باطنية وعلاج دوائي (BCPS)',
+                  labelEn: 'Pharmacotherapy (BCPS)'
+                },
+                {
+                  id: 'icu_critical_care' as const,
+                  labelAr: 'عناية مركزة وطوارئ (BCCCP)',
+                  labelEn: 'ICU & Critical Care (BCCCP)'
+                },
+                {
+                  id: 'ddi_pk_specialist' as const,
+                  labelAr: 'تداخلات وحركية دوائية (Stockley/TDM)',
+                  labelEn: 'Stockley DDI & PK/TDM'
+                }
+              ].map(role => (
+                <button
+                  key={role.id}
+                  type="button"
+                  onClick={() => setRolePersona(role.id)}
+                  className={`px-2 py-0.5 rounded-lg font-bold transition cursor-pointer ${
+                    rolePersona === role.id
+                      ? 'bg-teal-400 text-slate-950'
+                      : 'bg-white/10 text-teal-100 hover:bg-white/20'
+                  }`}
+                >
+                  {lang === 'ar' ? role.labelAr : role.labelEn}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <span className="text-teal-200/80 font-bold">
+                {lang === 'ar' ? 'النموذج:' : 'Model:'}
+              </span>
+              <select
+                value={preferredModel}
+                onChange={e =>
+                  setPreferredModel(
+                    e.target.value as
+                      | 'gemini-3.8-flash'
+                      | 'gemini-3.1-flash-lite'
+                      | 'gemini-4-argon'
+                  )
+                }
+                className="px-2 py-0.5 rounded-lg bg-slate-900/90 border border-teal-500/40 text-teal-100 font-mono text-[10px] font-bold focus:outline-hidden"
+              >
+                <option value="gemini-3.8-flash">
+                  {lang === 'ar'
+                    ? 'gemini-3.8-flash (المهام السريرية العامة)'
+                    : 'gemini-3.8-flash (General Clinical)'}
+                </option>
+                <option value="gemini-3.1-flash-lite">
+                  {lang === 'ar'
+                    ? 'gemini-3.1-flash-lite (فائق السرعة)'
+                    : 'gemini-3.1-flash-lite (Fast Response)'}
+                </option>
+                <option value="gemini-4-argon">
+                  {lang === 'ar'
+                    ? 'gemini-4-argon (استدلال معقد متقدم)'
+                    : 'gemini-4-argon (Complex Reasoning)'}
+                </option>
+              </select>
             </div>
           </div>
         </div>

@@ -1818,12 +1818,16 @@ export async function fetchServerPreindexedBook(
 
   if (!options?.forceReload) {
     const existing = getSyncedFullBookByIdSync(bookId);
+    const firstBodyLen = existing?.chapters?.[0]?.sections?.[0]?.body?.trim()?.length || 0;
+    const minCharsExpected = bookId === 'dipiro-13th-ed' ? 5_000_000 : 100_000;
     if (
       existing &&
       existing.processingStatus === 'verified_complete' &&
       existing.sourceType !== 'embedded_synthetic' &&
       Array.isArray(existing.chapters) &&
-      existing.chapters.length > 0
+      existing.chapters.length > 0 &&
+      (existing.totalCharacters || 0) >= minCharsExpected &&
+      firstBodyLen >= 80
     ) {
       return existing;
     }
@@ -1873,7 +1877,8 @@ export async function fetchServerPreindexedBook(
 let activeVaultSyncPromise: Promise<SyncedFullBookRecord[]> | null = null;
 
 export async function syncAllServerPreindexedBooks(
-  onProgress?: (progress: BookSyncProgress) => void
+  onProgress?: (progress: BookSyncProgress) => void,
+  options?: { forceReload?: boolean }
 ): Promise<SyncedFullBookRecord[]> {
   if (typeof fetch !== 'function') return [];
   if (activeVaultSyncPromise) {
@@ -1923,7 +1928,10 @@ export async function syncAllServerPreindexedBooks(
           message: `Loading pre-indexed reference "${item.sourceFileName}" (${item.totalPages} pages) from vault...`
         });
 
-        const rec = await fetchServerPreindexedBook(item.bookId, { silent: true });
+        const rec = await fetchServerPreindexedBook(item.bookId, {
+          silent: true,
+          forceReload: options?.forceReload
+        });
         if (rec) {
           synced.push(rec);
           onProgress?.({

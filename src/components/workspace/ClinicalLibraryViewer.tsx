@@ -225,6 +225,8 @@ export function ClinicalLibraryViewer({
 
   const categories: { key: string; labelEn: string; labelAr: string }[] = [
     { key: 'all', labelEn: `All Specialties (${allChapters.length} Ch.)`, labelAr: `جميع التخصصات (${allChapters.length} فصلاً)` },
+    { key: 'Pharmacotherapy & Internal Medicine', labelEn: 'Pharmacotherapy & Internal Medicine (DiPiro)', labelAr: 'العلاج الدوائي والباطنية الشاملة (DiPiro)' },
+    { key: 'Drug Interactions & Safety', labelEn: "Drug Interactions & Safety (Stockley's)", labelAr: "التداخلات الدوائية وسلامة الأدوية (Stockley's)" },
     { key: 'Cardiology', labelEn: 'Cardiology', labelAr: 'أمراض القلب والشرايين' },
     { key: 'Critical Care & Infectious Disease', labelEn: 'Critical Care, ID & Neuro', labelAr: 'العناية المركزة والإنتان والأعصاب' },
     { key: 'Nephrology & Fluids', labelEn: 'Nephrology, Fluids & PK/TDM', labelAr: 'الكلى والسوائل والحركية الدوائية' },
@@ -344,8 +346,12 @@ export function ClinicalLibraryViewer({
               type="button"
               onClick={() => {
                 setSelectedBookId(b.id);
+                setSelectedCategory('all');
                 if (b.chapters[0]) {
                   setActiveChapterId(b.chapters[0].id);
+                  if (b.chapters[0].startPage) {
+                    setActivePdfPage(b.chapters[0].startPage);
+                  }
                 }
               }}
               className={`px-3 py-1.5 rounded-xl font-bold transition whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
@@ -1210,8 +1216,12 @@ export function ClinicalLibraryViewer({
         onBookSynced={record => {
           setLibraryVersion(v => v + 1);
           setSelectedBookId(record.bookId);
+          setSelectedCategory('all');
           if (record.chapters[0]) {
             setActiveChapterId(record.chapters[0].id);
+            if (record.chapters[0].startPage) {
+              setActivePdfPage(record.chapters[0].startPage);
+            }
           }
         }}
       />

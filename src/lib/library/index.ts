@@ -237,7 +237,7 @@ export function getAllVerbatimBooks(): VerbatimBook[] {
       extractedTextPageCount: synced.extractedTextPageCount,
       ocrPageCount: synced.ocrPageCount,
       unprocessedPageCount: synced.unprocessedPageCount,
-      chapters: extraChapters.length > 0 ? [...baseBook.chapters, ...extraChapters] : baseBook.chapters
+      chapters: extraChapters.length > 0 ? [...extraChapters, ...baseBook.chapters] : baseBook.chapters
     };
   });
 
