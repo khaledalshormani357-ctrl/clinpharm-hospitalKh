@@ -47,9 +47,11 @@ import {
   FileText,
   Printer,
   Share2,
-  Columns2
+  Columns2,
+  Network
 } from 'lucide-react';
 import { printOrSaveClinicalPdf, shareClinicalFile } from '../../lib/androidPermissions';
+import { ClinicalTopicEncyclopediaView } from './ClinicalTopicEncyclopediaView';
 
 interface Props {
   lang: Language;
@@ -66,6 +68,9 @@ export function ClinicalLibraryViewer({
 }: Props) {
   const [libraryVersion, setLibraryVersion] = useState(0);
   const [driveSyncModalOpen, setDriveSyncModalOpen] = useState(false);
+  const [libraryEntryMode, setLibraryEntryMode] = useState<'clinical_topics' | 'verbatim_books'>(
+    initialChapterId ? 'verbatim_books' : 'clinical_topics'
+  );
   const [readerViewMode, setReaderViewMode] = useState<
     'verbatim_text' | 'pdf_canvas' | 'side_by_side'
   >('verbatim_text');
@@ -108,6 +113,7 @@ export function ClinicalLibraryViewer({
         c => c.id === initialChapterId || c.sourceUrl.includes(initialChapterId)
       );
       if (found) {
+        setLibraryEntryMode('verbatim_books');
         setActiveChapterId(found.id);
         setSelectedBookId(found.bookId);
       }
@@ -323,8 +329,70 @@ export function ClinicalLibraryViewer({
         </div>
       </div>
 
-      {/* Filter and Search Bar */}
-      <div className="p-3 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+      {/* Primary Paradigm Switcher: Topic-First Knowledge Graph vs. Verbatim Reference Books */}
+      <div className="bg-slate-900 text-slate-200 px-4 py-2 sm:px-6 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={() => setLibraryEntryMode('clinical_topics')}
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition flex items-center gap-2 cursor-pointer ${
+              libraryEntryMode === 'clinical_topics'
+                ? 'bg-teal-500 text-slate-950 shadow-xs'
+                : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+            }`}
+          >
+            <Network className="w-3.5 h-3.5" />
+            <span>
+              {lang === 'ar'
+                ? 'الموسوعة السريرية الموحدة حسب الموضوع (Clinical Topics — DKA & Heart Failure)'
+                : 'Topic-First Clinical Knowledge Graph (Prototype: DKA & Heart Failure)'}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setLibraryEntryMode('verbatim_books')}
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition flex items-center gap-2 cursor-pointer ${
+              libraryEntryMode === 'verbatim_books'
+                ? 'bg-teal-500 text-slate-950 shadow-xs'
+                : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+            }`}
+          >
+            <BookOpen className="w-3.5 h-3.5" />
+            <span>
+              {lang === 'ar'
+                ? `فهرس المراجع والكتب الأصلية (${books.length} مراجع • ${allChapters.length} فصلاً)`
+                : `Verbatim Reference Books (${books.length} Books • ${allChapters.length} Chapters)`}
+            </span>
+          </button>
+        </div>
+        <div className="text-[11px] text-teal-300/90 font-mono">
+          {lang === 'ar'
+            ? 'المبدأ: الموضوع السريري أولاً • تتبع صارم للمصدر والصفحة'
+            : 'Topic-First Architecture · 100% Verbatim Source Traceability'}
+        </div>
+      </div>
+
+      {libraryEntryMode === 'clinical_topics' ? (
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <ClinicalTopicEncyclopediaView
+            lang={lang}
+            onOpenVerbatimCitation={(bookId, chapterId, sectionId) => {
+              setLibraryEntryMode('verbatim_books');
+              setSelectedBookId(bookId);
+              setSelectedCategory('all');
+              setActiveChapterId(chapterId);
+              if (sectionId) {
+                setTimeout(() => {
+                  scrollToSection(sectionId);
+                }, 120);
+              }
+            }}
+          />
+        </div>
+      ) : (
+        <>
+          {/* Filter and Search Bar */}
+          <div className="p-3 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
         {/* Book Selector Pills */}
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 scrollbar-none text-xs">
           <button
@@ -1208,6 +1276,8 @@ export function ClinicalLibraryViewer({
           </div>
         </main>
       </div>
+      </>
+      )}
 
       <GoogleDriveBookSyncModal
         isOpen={driveSyncModalOpen}

@@ -2430,28 +2430,52 @@ export function resolveLocalReference(uriOrId?: string): ResolvedLocalReference 
     .replace(/^(local:\/\/ref\/chapter\/|local:\/\/ref\/source\/|local:\/\/ref\/export\/|local:\/\/ref\/|app:\/\/ref\/|#ref\/)/i, '')
     .trim();
 
-  // Verbatim chapter ID direct aliases
+  // Verbatim chapter ID & Knowledge Graph Topic URI direct aliases
   let targetChapterId = normalized;
   let targetVerbatimId: string | undefined = undefined;
+
+  if (normalized.startsWith('verbatim/')) {
+    const parts = normalized.replace(/^verbatim\//i, '').split('/');
+    const verbatimBook = parts[0] || '';
+    const verbatimChapter = parts[1] || '';
+    targetVerbatimId = verbatimChapter || verbatimBook;
+    targetChapterId = verbatimChapter || verbatimBook;
+  } else if (normalized.startsWith('topic/')) {
+    const topicSlug = normalized.replace(/^topic\//i, '').split('/')[0];
+    if (topicSlug.includes('dka') || topicSlug.includes('ketoacidosis')) {
+      targetChapterId = 'accp-2026-gi-liver-ascites';
+      targetVerbatimId = 'accp-v2-cirrhosis-dka';
+    } else if (topicSlug.includes('heart-failure') || topicSlug.includes('hf')) {
+      targetChapterId = 'dipiro-13-hf-cardiorenal';
+      targetVerbatimId = 'dipiro-ch15-hf';
+    }
+  }
+
   if (normalized === 'dipiro-ch15-hf' || normalized.includes('dipiro-ch15')) {
     targetChapterId = 'dipiro-13-hf-cardiorenal';
     targetVerbatimId = 'dipiro-ch15-hf';
+  } else if (normalized.includes('dipiro-ch83-endocrine-dka')) {
+    targetChapterId = 'accp-2026-gi-liver-ascites';
+    targetVerbatimId = 'dipiro-ch83-endocrine-dka';
   } else if (normalized === 'accp-v1-acs' || normalized.includes('accp-v1-acs')) {
     targetChapterId = 'cardio-2026-acs-antiplatelet';
     targetVerbatimId = 'accp-v1-acs';
+  } else if (normalized.includes('accp-cardio-2026-ch1') || normalized.includes('accp-cardio-2026-ch2')) {
+    targetChapterId = 'dipiro-13-hf-cardiorenal';
+    targetVerbatimId = targetVerbatimId || 'accp-cardio-2026-ch1-adhf-shock';
   } else if (normalized === 'accp-v1-critical-care-sepsis') {
     targetChapterId = 'dipiro-13-sepsis-aki-pk';
     targetVerbatimId = 'accp-v1-critical-care-sepsis';
   } else if (normalized === 'accp-v2-nephrology-aki-ckd') {
     targetChapterId = 'accp-2026-nephrology-aki';
     targetVerbatimId = 'accp-v2-nephrology-aki-ckd';
-  } else if (normalized === 'accp-v2-cirrhosis-dka') {
+  } else if (normalized === 'accp-v2-cirrhosis-dka' || normalized.includes('accp-v2-cirrhosis-dka')) {
     targetChapterId = 'accp-2026-gi-liver-ascites';
     targetVerbatimId = 'accp-v2-cirrhosis-dka';
-  } else if (normalized === 'casebook-ppcp-bedside') {
+  } else if (normalized === 'casebook-ppcp-bedside' || normalized.includes('casebook-section2')) {
     targetChapterId = 'casebook-ppcp-workup';
-    targetVerbatimId = 'casebook-ppcp-bedside';
-  } else if (normalized === 'hospital-compendium-protocols') {
+    targetVerbatimId = targetVerbatimId || 'casebook-ppcp-bedside';
+  } else if (normalized === 'hospital-compendium-protocols' || normalized.includes('hospital-compendium')) {
     targetChapterId = 'hosp-iv-electrolytes-compendium';
     targetVerbatimId = 'hospital-compendium-protocols';
   } else if (
@@ -2461,7 +2485,8 @@ export function resolveLocalReference(uriOrId?: string): ResolvedLocalReference 
   ) {
     targetChapterId = 'stockleys-ddi-master';
     targetVerbatimId =
-      normalized.startsWith('stockleys-ch') ? normalized : 'stockleys-ch1-anticoag-antiplatelet';
+      targetVerbatimId ||
+      (normalized.startsWith('stockleys-ch') ? normalized : 'stockleys-ch1-anticoag-antiplatelet');
   }
 
   // 1. Direct chapter match by ID or sourceUrl
