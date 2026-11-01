@@ -208,16 +208,19 @@ const STORE_CHECKPOINTS = 'book_batch_checkpoints';
 
 const memorySyncedBooksMap = new Map<string, SyncedFullBookRecord>();
 const memoryPdfBytesCache = new Map<string, ArrayBuffer>();
+const memoryBlobSummariesMap = new Map<string, PdfBlobSummary>();
+let isBlobSummariesHydrated = false;
 const memoryImportJobsMap = new Map<string, BookImportJobRecord>();
 const memoryCheckpointsMap = new Map<string, BookBatchCheckpointRecord>();
 let isHydrated = false;
+let inFlightHydration: Promise<SyncedFullBookRecord[]> | null = null;
 let simulatedDbSaveFailureMessage: string | null = null;
 
 export function setSimulatedDbSaveFailureForTest(message: string | null): void {
   simulatedDbSaveFailureMessage = message;
 }
 
-function notifyFullBooksUpdated() {
+export function notifyFullBooksUpdated() {
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('clinpharm-full-books-updated'));
   }
@@ -321,10 +324,15 @@ export function normalizeSyncedFullBookRecord(raw: SyncedFullBookRecord): Synced
     }
   }
 
-  const totalCharacters = pages.reduce(
-    (sum, p) => sum + ((p.extractedText || p.ocrText || '').length),
-    0
-  );
+  const totalCharacters =
+    pages.length > 0
+      ? pages.reduce((sum, p) => sum + (p.extractedText || p.ocrText || '').length, 0)
+      : raw.totalCharacters ||
+        (raw.chapters || []).reduce(
+          (sum, ch) =>
+            sum + (ch.sections || []).reduce((sSum, sec) => sSum + (sec.body || '').length, 0),
+          0
+        );
 
   return {
     ...raw,
@@ -379,36 +387,56 @@ function openFullBookDb(): Promise<IDBDatabase | null> {
   });
 }
 
-export async function hydrateSyncedFullBooks(): Promise<SyncedFullBookRecord[]> {
-  try {
-    const db = await openFullBookDb();
-    if (!db) return Array.from(memorySyncedBooksMap.values());
-
-    return await new Promise<SyncedFullBookRecord[]>((resolve, reject) => {
-      const tx = db.transaction(STORE_BOOKS, 'readonly');
-      const store = tx.objectStore(STORE_BOOKS);
-      const req = store.getAll();
-
-      req.onsuccess = () => {
-        const rawRecords = (req.result || []) as SyncedFullBookRecord[];
-        memorySyncedBooksMap.clear();
-        const normalizedList: SyncedFullBookRecord[] = [];
-        for (const raw of rawRecords) {
-          const normalized = normalizeSyncedFullBookRecord(raw);
-          memorySyncedBooksMap.set(normalized.bookId, normalized);
-          normalizedList.push(normalized);
-        }
-        isHydrated = true;
-        notifyFullBooksUpdated();
-        resolve(normalizedList);
-      };
-
-      req.onerror = () => reject(req.error);
-    });
-  } catch (err) {
-    console.warn('IndexedDB hydration warning:', err);
+export async function hydrateSyncedFullBooks(options?: {
+  forceFromDb?: boolean;
+}): Promise<SyncedFullBookRecord[]> {
+  if (isHydrated && !options?.forceFromDb) {
     return Array.from(memorySyncedBooksMap.values());
   }
+  if (inFlightHydration && !options?.forceFromDb) {
+    return inFlightHydration;
+  }
+
+  inFlightHydration = (async () => {
+    try {
+      const db = await openFullBookDb();
+      if (!db) {
+        isHydrated = true;
+        return Array.from(memorySyncedBooksMap.values());
+      }
+
+      return await new Promise<SyncedFullBookRecord[]>((resolve, reject) => {
+        const tx = db.transaction(STORE_BOOKS, 'readonly');
+        const store = tx.objectStore(STORE_BOOKS);
+        const req = store.openCursor();
+        const normalizedList: SyncedFullBookRecord[] = [];
+        memorySyncedBooksMap.clear();
+
+        req.onsuccess = () => {
+          const cursor = req.result;
+          if (cursor) {
+            const raw = cursor.value as SyncedFullBookRecord;
+            const normalized = normalizeSyncedFullBookRecord(raw);
+            memorySyncedBooksMap.set(normalized.bookId, normalized);
+            normalizedList.push(normalized);
+            cursor.continue();
+          } else {
+            isHydrated = true;
+            resolve(normalizedList);
+          }
+        };
+
+        req.onerror = () => reject(req.error);
+      });
+    } catch (err) {
+      console.warn('IndexedDB hydration warning:', err);
+      return Array.from(memorySyncedBooksMap.values());
+    } finally {
+      inFlightHydration = null;
+    }
+  })();
+
+  return inFlightHydration;
 }
 
 export function getSyncedFullBooksSync(): SyncedFullBookRecord[] {
@@ -438,7 +466,8 @@ export function findVerifiedBookBySha256Sync(sha256: string): SyncedFullBookReco
 
 export async function saveSyncedFullBook(
   rawRecord: SyncedFullBookRecord,
-  pdfBytes?: ArrayBuffer
+  pdfBytes?: ArrayBuffer,
+  options?: { silent?: boolean }
 ): Promise<SyncedFullBookRecord> {
   if (simulatedDbSaveFailureMessage) {
     throw new Error(simulatedDbSaveFailureMessage);
@@ -446,17 +475,43 @@ export async function saveSyncedFullBook(
 
   const record = normalizeSyncedFullBookRecord(rawRecord);
   memorySyncedBooksMap.set(record.bookId, record);
-  if (pdfBytes && pdfBytes.byteLength > 0) {
-    memoryPdfBytesCache.set(record.bookId, pdfBytes.slice(0));
-  }
-  notifyFullBooksUpdated();
+  isHydrated = true;
 
-  if (typeof navigator !== 'undefined' && navigator.storage?.persist) {
-    void navigator.storage.persist().catch(() => {});
+  if (pdfBytes && pdfBytes.byteLength > 0) {
+    // Only keep raw PDF bytes in memory if IndexedDB is unavailable (e.g. Node unit tests)
+    if (typeof indexedDB === 'undefined') {
+      memoryPdfBytesCache.set(record.bookId, pdfBytes.slice(0));
+    }
+    const header = new Uint8Array(pdfBytes, 0, Math.min(16, pdfBytes.byteLength));
+    let isValidPdfSignature = false;
+    for (let i = 0; i <= header.length - 5; i++) {
+      if (
+        header[i] === 0x25 &&
+        header[i + 1] === 0x50 &&
+        header[i + 2] === 0x44 &&
+        header[i + 3] === 0x46 &&
+        header[i + 4] === 0x2d
+      ) {
+        isValidPdfSignature = true;
+        break;
+      }
+    }
+    memoryBlobSummariesMap.set(record.bookId, {
+      bookId: record.bookId,
+      fileName: record.sourceFileName || record.fileName,
+      byteLength: pdfBytes.byteLength,
+      savedAt: record.syncedAt,
+      isValidPdfSignature
+    });
   }
 
   const db = await openFullBookDb();
-  if (!db) return record;
+  if (!db) {
+    if (!options?.silent) {
+      notifyFullBooksUpdated();
+    }
+    return record;
+  }
 
   await new Promise<void>((resolve, reject) => {
     const stores = pdfBytes ? [STORE_BOOKS, STORE_BLOBS] : [STORE_BOOKS];
@@ -476,7 +531,9 @@ export async function saveSyncedFullBook(
     }
 
     tx.oncomplete = () => {
-      notifyFullBooksUpdated();
+      if (!options?.silent) {
+        notifyFullBooksUpdated();
+      }
       resolve();
     };
     tx.onerror = () => reject(tx.error);
@@ -640,43 +697,25 @@ export interface PdfBlobSummary {
 }
 
 export async function getAllSyncedPdfBlobSummaries(): Promise<PdfBlobSummary[]> {
+  if (isBlobSummariesHydrated && memoryBlobSummariesMap.size > 0) {
+    return Array.from(memoryBlobSummariesMap.values());
+  }
+
   try {
     const db = await openFullBookDb();
     if (!db) {
-      const memSummaries: PdfBlobSummary[] = [];
-      for (const [bookId, pdfBytes] of memoryPdfBytesCache.entries()) {
-        const rec = memorySyncedBooksMap.get(bookId);
-        const header = new Uint8Array(pdfBytes, 0, Math.min(16, pdfBytes.byteLength));
-        let isValidPdfSignature = false;
-        for (let i = 0; i <= header.length - 5; i++) {
-          if (
-            header[i] === 0x25 &&
-            header[i + 1] === 0x50 &&
-            header[i + 2] === 0x44 &&
-            header[i + 3] === 0x46 &&
-            header[i + 4] === 0x2d
-          ) {
-            isValidPdfSignature = true;
-            break;
-          }
-        }
-        memSummaries.push({
-          bookId,
-          fileName: rec?.sourceFileName || rec?.fileName || `${bookId}.pdf`,
-          byteLength: pdfBytes.byteLength,
-          savedAt: rec?.syncedAt || new Date().toISOString(),
-          isValidPdfSignature
-        });
-      }
-      return memSummaries;
+      return Array.from(memoryBlobSummariesMap.values());
     }
 
     return await new Promise<PdfBlobSummary[]>((resolve, reject) => {
       const tx = db.transaction(STORE_BLOBS, 'readonly');
-      const req = tx.objectStore(STORE_BLOBS).getAll();
+      const req = tx.objectStore(STORE_BLOBS).openCursor();
+      const summaries: PdfBlobSummary[] = [];
+
       req.onsuccess = () => {
-        const records = (req.result || []) as SyncedPdfBlobRecord[];
-        const summaries: PdfBlobSummary[] = records.map(r => {
+        const cursor = req.result;
+        if (cursor) {
+          const r = cursor.value as SyncedPdfBlobRecord;
           const byteLength = r.pdfBytes?.byteLength || 0;
           let isValidPdfSignature = false;
           if (r.pdfBytes && byteLength >= 5) {
@@ -694,31 +733,39 @@ export async function getAllSyncedPdfBlobSummaries(): Promise<PdfBlobSummary[]> 
               }
             }
           }
-          return {
+          const summary: PdfBlobSummary = {
             bookId: r.bookId,
             fileName: r.fileName,
             byteLength,
             savedAt: r.savedAt,
             isValidPdfSignature
           };
-        });
-        resolve(summaries);
+          memoryBlobSummariesMap.set(r.bookId, summary);
+          summaries.push(summary);
+          cursor.continue();
+        } else {
+          isBlobSummariesHydrated = true;
+          resolve(summaries);
+        }
       };
       req.onerror = () => reject(req.error);
     });
   } catch {
-    return [];
+    return Array.from(memoryBlobSummariesMap.values());
   }
 }
 
 export async function removeSyncedFullBook(bookId: string): Promise<void> {
   memorySyncedBooksMap.delete(bookId);
   memoryPdfBytesCache.delete(bookId);
+  memoryBlobSummariesMap.delete(bookId);
   memoryCheckpointsMap.delete(bookId);
-  notifyFullBooksUpdated();
 
   const db = await openFullBookDb();
-  if (!db) return;
+  if (!db) {
+    notifyFullBooksUpdated();
+    return;
+  }
 
   await new Promise<void>((resolve, reject) => {
     const storeNames = [STORE_BOOKS, STORE_BLOBS];
@@ -742,12 +789,17 @@ export async function removeSyncedFullBook(bookId: string): Promise<void> {
 export async function clearAllSyncedFullBooksFromIdb(): Promise<void> {
   memorySyncedBooksMap.clear();
   memoryPdfBytesCache.clear();
+  memoryBlobSummariesMap.clear();
   memoryImportJobsMap.clear();
   memoryCheckpointsMap.clear();
-  notifyFullBooksUpdated();
+  isHydrated = false;
+  isBlobSummariesHydrated = false;
 
   const db = await openFullBookDb();
-  if (!db) return;
+  if (!db) {
+    notifyFullBooksUpdated();
+    return;
+  }
 
   await new Promise<void>((resolve, reject) => {
     const storeNames = [STORE_BOOKS, STORE_BLOBS];

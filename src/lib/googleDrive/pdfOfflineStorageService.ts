@@ -371,7 +371,9 @@ export async function verifyOfflineBookIntegrity(bookId: string): Promise<Integr
   const ocrPageCount = record.ocrPageCount ?? 0;
   const unprocessedPageCount = record.unprocessedPageCount ?? 0;
 
-  const hasVerbatimPages = record.pages.length > 0 && originalPageCount > 0;
+  const hasVerbatimPages =
+    (record.pages.length > 0 || extractedTextPageCount > 0 || record.chapters.length > 0) &&
+    originalPageCount > 0;
   const hasBinaryPdf = Boolean(pdfBytes && pdfBytes.byteLength > 0);
   const isValidPdfHeader = verifyPdfMagicHeader(pdfBytes);
   const binaryBytes = pdfBytes?.byteLength || 0;

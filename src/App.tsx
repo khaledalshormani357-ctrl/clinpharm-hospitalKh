@@ -18,7 +18,7 @@ import {
   getSyncedFullBooksSync,
   hydrateSyncedFullBooks
 } from './lib/googleDrive/fullBookIdb';
-import { fetchServerPreindexedBook } from './lib/googleDrive/fullBookEngine';
+import { syncAllServerPreindexedBooks } from './lib/googleDrive/fullBookEngine';
 
 const STORAGE_KEYS = {
   PATIENTS: 'clinpharm_patients_v2',
@@ -161,28 +161,14 @@ export default function App() {
       void (async () => {
         try {
           await hydrateSyncedFullBooks();
-          const res = await fetch('/api/books/server-vault');
-          if (!res.ok) return;
-          const data = (await res.json()) as {
-            ok?: boolean;
-            books?: Array<{ bookId: string; totalPages: number }>;
-          };
-          const vaultBooks = Array.isArray(data?.books) ? data.books : [];
-          if (vaultBooks.length === 0) return;
           const current = getSyncedFullBooksSync();
-          const verifiedIds = new Set(
-            current
-              .filter(
-                b =>
-                  b.processingStatus === 'verified_complete' &&
-                  b.sourceType !== 'embedded_synthetic'
-              )
-              .map(b => b.bookId)
-          );
-          for (const vb of vaultBooks) {
-            if (!verifiedIds.has(vb.bookId)) {
-              await fetchServerPreindexedBook(vb.bookId);
-            }
+          const verifiedCount = current.filter(
+            b =>
+              b.processingStatus === 'verified_complete' &&
+              b.sourceType !== 'embedded_synthetic'
+          ).length;
+          if (verifiedCount < 6) {
+            await syncAllServerPreindexedBooks();
           }
         } catch {
           // ignore background vault sync errors

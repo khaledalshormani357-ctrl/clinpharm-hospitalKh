@@ -644,6 +644,23 @@ export function ClinicalLibraryViewer({
                           setTimeout(() => {
                             scrollToSection(pageRec.sectionId);
                           }, 80);
+                        } else {
+                          const matchedCh = syncedFullBookRecord.chapters.find(
+                            c =>
+                              (c.startPage ?? 1) <= targetPage &&
+                              (c.endPage ?? c.startPage ?? 1) >= targetPage
+                          );
+                          if (matchedCh) {
+                            setActiveChapterId(matchedCh.id);
+                            const matchedSec = matchedCh.sections.find(
+                              s => s.originalPageNumber === targetPage
+                            );
+                            if (matchedSec) {
+                              setTimeout(() => {
+                                scrollToSection(matchedSec.id);
+                              }, 80);
+                            }
+                          }
                         }
                       }
                     }}
@@ -870,7 +887,25 @@ export function ClinicalLibraryViewer({
                         const pRec = syncedFullBookRecord.pages.find(
                           p => p.pageNumber === activePdfPage
                         );
-                        if (!pRec || (!pRec.extractedText && !pRec.ocrText && !pRec.text)) {
+                        let fallbackText = pRec?.extractedText || pRec?.ocrText || pRec?.text || '';
+                        if (!fallbackText) {
+                          for (const ch of syncedFullBookRecord.chapters) {
+                            const sec = ch.sections.find(s => s.originalPageNumber === activePdfPage);
+                            if (sec?.body) {
+                              fallbackText = sec.body;
+                              break;
+                            }
+                            if (
+                              (ch.startPage ?? 0) <= activePdfPage &&
+                              (ch.endPage ?? 0) >= activePdfPage &&
+                              ch.sections[0]?.body
+                            ) {
+                              fallbackText = ch.sections[0].body;
+                              break;
+                            }
+                          }
+                        }
+                        if (!fallbackText) {
                           return (
                             <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200 text-xs">
                               {lang === 'ar'
@@ -889,7 +924,7 @@ export function ClinicalLibraryViewer({
                         }
                         return (
                           <div className="text-xs sm:text-sm leading-relaxed font-serif whitespace-pre-line max-h-[600px] overflow-y-auto">
-                            {pRec.extractedText || pRec.ocrText || pRec.text}
+                            {fallbackText}
                           </div>
                         );
                       })()}

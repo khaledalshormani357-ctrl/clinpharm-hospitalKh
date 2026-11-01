@@ -20,6 +20,8 @@ import {
   clearBookBatchCheckpoint,
   findVerifiedBookBySha256Sync,
   getBookBatchCheckpoint,
+  getSyncedFullBookByIdSync,
+  notifyFullBooksUpdated,
   saveBookBatchCheckpoint,
   saveBookImportJob,
   saveSyncedFullBook
@@ -1772,51 +1774,26 @@ const DEFAULT_PREINDEXED_VAULT_SUMMARIES: Array<{
   }
 ];
 
-const VAULT_REQUEST_TIMEOUT_MS = 120_000;
-const MAX_VAULT_PACK_BYTES = 300 * 1024 * 1024;
-
-async function consumeWithTimeout<T>(
-  url: string,
-  consume: (response: Response) => Promise<T>,
-  timeoutMs = VAULT_REQUEST_TIMEOUT_MS
-): Promise<T> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(url, { signal: controller.signal });
-    return await consume(response);
-  } catch (error) {
-    if (controller.signal.aborted) {
-      throw new Error(`Server book download timed out after ${timeoutMs}ms: ${url}`);
-    }
-    throw error;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 async function decodeVaultRecordResponse(res: Response): Promise<SyncedFullBookRecord | null> {
   try {
     const contentType = (res.headers.get('content-type') || '').toLowerCase();
-    if (!res.ok || contentType.includes('text/html')) return null;
-    const declaredLength = Number(res.headers.get('content-length') || 0);
-    if (declaredLength > MAX_VAULT_PACK_BYTES) {
-      throw new Error(`Server book pack exceeds ${MAX_VAULT_PACK_BYTES} bytes.`);
-    }
+    if (contentType.includes('text/html')) return null;
 
     const buf = await res.arrayBuffer();
-    if (!buf || buf.byteLength < 64 || buf.byteLength > MAX_VAULT_PACK_BYTES) return null;
+    if (!buf || buf.byteLength < 64) return null;
     const bytes = new Uint8Array(buf);
 
     let jsonText = '';
+    // Check GZIP magic header (0x1f 0x8b)
     if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
-      if (typeof DecompressionStream === 'undefined') {
-        throw new Error('This device does not support streaming GZIP decompression.');
+      if (typeof DecompressionStream !== 'undefined') {
+        const decompressedStream = new Blob([buf])
+          .stream()
+          .pipeThrough(new DecompressionStream('gzip'));
+        jsonText = await new Response(decompressedStream).text();
+      } else {
+        return null;
       }
-      const decompressedStream = new Blob([buf])
-        .stream()
-        .pipeThrough(new DecompressionStream('gzip'));
-      jsonText = await new Response(decompressedStream).text();
     } else {
       jsonText = new TextDecoder('utf-8').decode(bytes);
     }
@@ -1824,17 +1801,33 @@ async function decodeVaultRecordResponse(res: Response): Promise<SyncedFullBookR
     const trimmed = jsonText.trim();
     if (!trimmed.startsWith('{')) return null;
     const parsed = JSON.parse(trimmed) as SyncedFullBookRecord;
-    return parsed && parsed.bookId && Array.isArray(parsed.chapters) ? parsed : null;
-  } catch (error) {
-    if (error instanceof Error && /exceeds|does not support/.test(error.message)) throw error;
+    if (!parsed || !parsed.bookId || !Array.isArray(parsed.chapters)) {
+      return null;
+    }
+    return parsed;
+  } catch {
     return null;
   }
 }
 
 export async function fetchServerPreindexedBook(
-  bookId: string
+  bookId: string,
+  options?: { silent?: boolean; forceReload?: boolean }
 ): Promise<SyncedFullBookRecord | null> {
   if (typeof fetch !== 'function' || customPdfJsLoaderForTest) return null;
+
+  if (!options?.forceReload) {
+    const existing = getSyncedFullBookByIdSync(bookId);
+    if (
+      existing &&
+      existing.processingStatus === 'verified_complete' &&
+      existing.sourceType !== 'embedded_synthetic' &&
+      Array.isArray(existing.chapters) &&
+      existing.chapters.length > 0
+    ) {
+      return existing;
+    }
+  }
 
   const encodedId = encodeURIComponent(bookId);
   const candidateUrls = [
@@ -1847,11 +1840,9 @@ export async function fetchServerPreindexedBook(
   let record: SyncedFullBookRecord | null = null;
   for (const url of candidateUrls) {
     try {
-      const decoded = await consumeWithTimeout(
-        url,
-        response => decodeVaultRecordResponse(response),
-        180_000
-      );
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const decoded = await decodeVaultRecordResponse(res);
       if (decoded && decoded.bookId === bookId) {
         record = decoded;
         break;
@@ -1864,117 +1855,77 @@ export async function fetchServerPreindexedBook(
   if (!record) return null;
 
   try {
-    // Reconstruct pages & structuredSections if the server vault served a compact payload
-    if (!Array.isArray(record.pages) || record.pages.length === 0) {
-      const pageByNum = new Map<number, FullBookPageRecord>();
-      const builtSections: StructuredBookSectionRecord[] = [];
-      for (const ch of record.chapters) {
-        const secs = Array.isArray(ch.sections) ? ch.sections : [];
-        for (let sIdx = 0; sIdx < secs.length; sIdx++) {
-          const s = secs[sIdx];
-          const pNum = s.originalPageNumber || sIdx + 1;
-          const bodyText = s.body || '';
-          const method = s.extractionMethod || (bodyText.trim() ? 'native_text' : 'blank');
-          const status = s.extractionStatus || (bodyText.trim() ? 'extracted' : 'blank');
-          if (!pageByNum.has(pNum)) {
-            pageByNum.set(pNum, {
-              id: `${record.bookId}-page-${pNum}`,
-              bookId: record.bookId,
-              pageNumber: pNum,
-              originalPageNumber: pNum,
-              text: bodyText,
-              extractedText: method === 'ocr' ? '' : bodyText,
-              ocrText: s.ocrBody || (method === 'ocr' ? bodyText : null),
-              extractionMethod: method,
-              extractionStatus: status,
-              ocrConfidence: s.ocrConfidence ?? null,
-              hasEmbeddedImages: false,
-              contentHash: s.contentHash || computeContentHash(bodyText),
-              chapterId: ch.id,
-              chapterTitle: ch.title,
-              sectionId: s.id,
-              lineCount: bodyText ? bodyText.split('\n').length : 0
-            });
-          }
-          builtSections.push({
-            id: s.id,
-            bookId: record.bookId,
-            chapterId: ch.id,
-            pageNumber: pNum,
-            sectionOrder: sIdx + 1,
-            heading: s.heading,
-            headingAr: s.headingAr,
-            fullText: bodyText,
-            extractionMethod: method,
-            contentHash: s.contentHash || ''
-          });
-        }
-      }
-      record.pages = Array.from(pageByNum.values()).sort((a, b) => a.pageNumber - b.pageNumber);
-      if (!Array.isArray(record.structuredSections) || record.structuredSections.length === 0) {
-        record.structuredSections = builtSections;
-      }
+    // Keep pages and structuredSections compact on mobile/WebView to avoid duplicating
+    // 40+ MB of chapter text 4x in V8 heap and IndexedDB Mojo IPC.
+    if (!Array.isArray(record.pages)) {
+      record.pages = [];
+    }
+    if (!Array.isArray(record.structuredSections)) {
+      record.structuredSections = [];
     }
 
-    return await saveSyncedFullBook(record);
+    return await saveSyncedFullBook(record, undefined, { silent: options?.silent });
   } catch {
     return null;
   }
 }
 
+let activeVaultSyncPromise: Promise<SyncedFullBookRecord[]> | null = null;
+
 export async function syncAllServerPreindexedBooks(
   onProgress?: (progress: BookSyncProgress) => void
 ): Promise<SyncedFullBookRecord[]> {
   if (typeof fetch !== 'function') return [];
+  if (activeVaultSyncPromise) {
+    return activeVaultSyncPromise;
+  }
 
-  let summaries: Array<{ bookId: string; sourceFileName: string; totalPages: number }> = [];
-  const indexUrls = [
-    './books-vault/index.json',
-    '/books-vault/index.json',
-    '/api/books/server-vault',
-    `${GITHUB_RAW_VAULT_BASE}/index.json`
-  ];
-
-  for (const url of indexUrls) {
+  activeVaultSyncPromise = (async () => {
     try {
-      const raw = await consumeWithTimeout(url, async listRes => {
-        if (!listRes.ok) return null;
-        const contentType = (listRes.headers.get('content-type') || '').toLowerCase();
-        if (contentType.includes('text/html')) return null;
-        return await listRes.json();
-      }, 45_000);
-      if (!raw) continue;
-      const list = Array.isArray(raw) ? raw : Array.isArray(raw?.books) ? raw.books : [];
-      if (list.length > 0) {
-        summaries = list;
-        break;
+      let summaries: Array<{ bookId: string; sourceFileName: string; totalPages: number }> = [];
+      const indexUrls = [
+        './books-vault/index.json',
+        '/books-vault/index.json',
+        '/api/books/server-vault',
+        `${GITHUB_RAW_VAULT_BASE}/index.json`
+      ];
+
+      for (const url of indexUrls) {
+        try {
+          const listRes = await fetch(url);
+          if (!listRes.ok) continue;
+          const contentType = (listRes.headers.get('content-type') || '').toLowerCase();
+          if (contentType.includes('text/html')) continue;
+          const raw = await listRes.json();
+          const list = Array.isArray(raw) ? raw : Array.isArray(raw?.books) ? raw.books : [];
+          if (list.length > 0) {
+            summaries = list;
+            break;
+          }
+        } catch {
+          // try next index source
+        }
       }
-    } catch {
-      // try next index source
-    }
-  }
 
-  if (summaries.length === 0) {
-    summaries = DEFAULT_PREINDEXED_VAULT_SUMMARIES;
-  }
+      if (summaries.length === 0) {
+        summaries = DEFAULT_PREINDEXED_VAULT_SUMMARIES;
+      }
 
-  const synced: SyncedFullBookRecord[] = [];
-  // Limit concurrency to two large packs to avoid exhausting Android WebView memory.
-  for (let offset = 0; offset < summaries.length; offset += 2) {
-    const batch = summaries.slice(offset, offset + 2);
-    const batchResults = await Promise.all(batch.map(async item => {
-      onProgress?.({
-        bookId: item.bookId,
-        fileName: item.sourceFileName || item.bookId,
-        phase: 'downloading',
-        currentPage: 0,
-        totalPages: item.totalPages || 0,
-        processingStatus: 'extracting',
-        message: `Downloading "${item.sourceFileName}" from server vault (request timeout: 3 minutes)...`
-      });
-      try {
-        const rec = await fetchServerPreindexedBook(item.bookId);
+      const synced: SyncedFullBookRecord[] = [];
+      for (const item of summaries) {
+        onProgress?.({
+          bookId: item.bookId,
+          fileName: item.sourceFileName || item.bookId,
+          phase: 'downloading',
+          currentPage: 0,
+          totalPages: item.totalPages || 0,
+          processingStatus: 'extracting',
+          message: `Loading pre-indexed reference "${item.sourceFileName}" (${item.totalPages} pages) from vault...`
+        });
+
+        const rec = await fetchServerPreindexedBook(item.bookId, { silent: true });
         if (rec) {
+          synced.push(rec);
           onProgress?.({
             bookId: rec.bookId,
             fileName: rec.sourceFileName || rec.fileName,
@@ -1984,34 +1935,21 @@ export async function syncAllServerPreindexedBooks(
             processingStatus: rec.processingStatus,
             message: `Verified complete! Loaded "${rec.sourceFileName}" (${rec.totalPages} pages).`
           });
-        } else {
-          onProgress?.({
-            bookId: item.bookId,
-            fileName: item.sourceFileName || item.bookId,
-            phase: 'error',
-            currentPage: 0,
-            totalPages: item.totalPages || 0,
-            processingStatus: 'failed',
-            message: `Could not load "${item.sourceFileName || item.bookId}" from any configured server source.`
-          });
         }
-        return rec;
-      } catch (error) {
-        onProgress?.({
-          bookId: item.bookId,
-          fileName: item.sourceFileName || item.bookId,
-          phase: 'error',
-          currentPage: 0,
-          totalPages: item.totalPages || 0,
-          processingStatus: 'failed',
-          message: error instanceof Error ? error.message : 'Unknown server download error.'
-        });
-        return null;
+        // Yield to event loop so Android WebView GC frees decompression buffers between books
+        await new Promise(resolve => setTimeout(resolve, 40));
       }
-    }));
-    synced.push(...batchResults.filter((record): record is SyncedFullBookRecord => Boolean(record)));
-  }
-  return synced;
+
+      if (synced.length > 0) {
+        notifyFullBooksUpdated();
+      }
+      return synced;
+    } finally {
+      activeVaultSyncPromise = null;
+    }
+  })();
+
+  return activeVaultSyncPromise;
 }
 
 export async function fetchPublicDrivePdfViaProxy(
