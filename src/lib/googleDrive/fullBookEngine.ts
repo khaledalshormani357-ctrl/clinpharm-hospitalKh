@@ -1795,6 +1795,16 @@ async function consumeWithTimeout<T>(
   }
 }
 
+const MAX_VAULT_JSON_BYTES = 512 * 1024 * 1024;
+
+/**
+ * Read and optionally decompress the vault response as a stream. Do not first
+ * materialize the compressed pack as an ArrayBuffer and then copy it into a Blob:
+ * that created an avoidable second large binary allocation on Android WebView.
+ *
+ * JSON.parse still requires the complete JSON document; the byte ceiling below
+ * bounds decompression and the caller processes only one book at a time.
+ */
 async function decodeVaultRecordResponse(res: Response): Promise<SyncedFullBookRecord | null> {
   try {
     const contentType = (res.headers.get('content-type') || '').toLowerCase();
@@ -1803,25 +1813,73 @@ async function decodeVaultRecordResponse(res: Response): Promise<SyncedFullBookR
     if (declaredLength > MAX_VAULT_PACK_BYTES) {
       throw new Error(`Server book pack exceeds ${MAX_VAULT_PACK_BYTES} bytes.`);
     }
-
-    const buf = await res.arrayBuffer();
-    if (!buf || buf.byteLength < 64 || buf.byteLength > MAX_VAULT_PACK_BYTES) return null;
-    const bytes = new Uint8Array(buf);
-
-    let jsonText = '';
-    if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
-      if (typeof DecompressionStream === 'undefined') {
-        throw new Error('This device does not support streaming GZIP decompression.');
+    if (!res.body || typeof res.body.getReader !== 'function') {
+      const fallback = await res.text();
+      if (fallback.length > MAX_VAULT_JSON_BYTES) {
+        throw new Error(`Decompressed server book exceeds ${MAX_VAULT_JSON_BYTES} bytes.`);
       }
-      const decompressedStream = new Blob([buf])
-        .stream()
-        .pipeThrough(new DecompressionStream('gzip'));
-      jsonText = await new Response(decompressedStream).text();
-    } else {
-      jsonText = new TextDecoder('utf-8').decode(bytes);
+      const parsed = JSON.parse(fallback.trim()) as SyncedFullBookRecord;
+      return parsed && parsed.bookId && Array.isArray(parsed.chapters) ? parsed : null;
     }
 
-    const trimmed = jsonText.trim();
+    let stream: ReadableStream<Uint8Array> = res.body;
+    const readerForHeader = stream.getReader();
+    const first = await readerForHeader.read();
+    if (first.done || !first.value || first.value.byteLength === 0) return null;
+
+    const firstBytes = first.value;
+    const isGzip = firstBytes[0] === 0x1f && firstBytes[1] === 0x8b;
+    const prefixStream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(firstBytes);
+        const pump = async () => {
+          try {
+            while (true) {
+              const next = await readerForHeader.read();
+              if (next.done) break;
+              if (next.value) controller.enqueue(next.value);
+            }
+            controller.close();
+          } catch (error) {
+            controller.error(error);
+          }
+        };
+        void pump();
+      },
+      cancel(reason) {
+        return readerForHeader.cancel(reason);
+      }
+    });
+
+    if (isGzip) {
+      if (typeof DecompressionStream === 'undefined') {
+        await readerForHeader.cancel().catch(() => {});
+        throw new Error('This device does not support streaming GZIP decompression.');
+      }
+      stream = prefixStream.pipeThrough(new DecompressionStream('gzip'));
+    } else {
+      stream = prefixStream;
+    }
+
+    const reader = stream.getReader();
+    const decoder = new TextDecoder('utf-8');
+    const textChunks: string[] = [];
+    let decodedBytes = 0;
+    while (true) {
+      const part = await reader.read();
+      if (part.done) break;
+      if (!part.value) continue;
+      decodedBytes += part.value.byteLength;
+      if (decodedBytes > MAX_VAULT_JSON_BYTES) {
+        await reader.cancel().catch(() => {});
+        throw new Error(`Decompressed server book exceeds ${MAX_VAULT_JSON_BYTES} bytes.`);
+      }
+      const text = decoder.decode(part.value, { stream: true });
+      if (text) textChunks.push(text);
+    }
+    const tail = decoder.decode();
+    if (tail) textChunks.push(tail);
+    const trimmed = textChunks.join('').trim();
     if (!trimmed.startsWith('{')) return null;
     const parsed = JSON.parse(trimmed) as SyncedFullBookRecord;
     return parsed && parsed.bookId && Array.isArray(parsed.chapters) ? parsed : null;
@@ -1959,9 +2017,10 @@ export async function syncAllServerPreindexedBooks(
   }
 
   const synced: SyncedFullBookRecord[] = [];
-  // Limit concurrency to two large packs to avoid exhausting Android WebView memory.
-  for (let offset = 0; offset < summaries.length; offset += 2) {
-    const batch = summaries.slice(offset, offset + 2);
+  // Large reference packs (especially DiPiro) must be downloaded one at a time.
+  // Parallel fetch + JSON parsing multiplies peak WebView memory usage.
+  for (let offset = 0; offset < summaries.length; offset += 1) {
+    const batch = summaries.slice(offset, offset + 1);
     const batchResults = await Promise.all(batch.map(async item => {
       onProgress?.({
         bookId: item.bookId,
