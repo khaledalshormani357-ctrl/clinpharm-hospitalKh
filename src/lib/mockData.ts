@@ -1,3 +1,4 @@
+/** Synthetic development/demo fixtures only; see docs/SYNTHETIC_DATA.md. */
 import { Patient, ClinicalIntervention, ReconciliationDiscrepancy, ClinicalCase } from '../types/clinical';
 
 export const INITIAL_PATIENTS: Patient[] = [

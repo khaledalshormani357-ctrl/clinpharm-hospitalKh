@@ -49,6 +49,15 @@ import { syncQueue } from '../lib/supabase/syncQueue';
 import { authService } from '../lib/supabase/auth';
 import { getActiveHospitalUser, subscribeHospitalUsers, HospitalUser } from '../lib/usersManager';
 import { hydrateSyncedFullBooks } from '../lib/googleDrive/fullBookIdb';
+import { buildNavigationEntries } from '../lib/navigation';
+import { useHashTabNavigation } from '../hooks/useHashTabNavigation';
+import { hasDrawerHistoryMarker, useBackDismiss } from '../hooks/useBackDismiss';
+import { ClinicalAppShell } from './navigation/ClinicalAppShell';
+import { ContextualSidebar } from './navigation/ContextualSidebar';
+import { GlobalHeader } from './navigation/GlobalHeader';
+import { MobileBottomNavigation } from './navigation/MobileBottomNavigation';
+import { MobileNavigationDrawer } from './navigation/MobileNavigationDrawer';
+import { PrimarySidebar } from './navigation/PrimarySidebar';
 
 interface Props {
   patients: Patient[];
@@ -77,9 +86,8 @@ export function DashboardLayout({
 }: Props) {
   const [lang, setLang] = useState<Language>('ar');
   const [isDarkMode, setIsDarkMode] = useState(false);
-  const [activeTab, setActiveTab] = useState<
-    'patients' | 'reconciliation' | 'calculators' | 'alerts' | 'interventions' | 'guidelines' | 'training' | 'users_admin'
-  >('patients');
+  const [activeTab, setActiveTab] = useHashTabNavigation();
+  const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
   const [selectedWard, setSelectedWard] = useState<string>('all');
   const [selectedStatus, setSelectedStatus] = useState<'all' | PatientStatus>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -201,8 +209,40 @@ export function DashboardLayout({
     setSelectedPatient(null);
   };
 
-  const isSafetyGroupActive = activeTab === 'alerts' || activeTab === 'interventions';
-  const isMoreGroupActive = activeTab === 'reconciliation' || activeTab === 'training' || activeTab === 'users_admin';
+  const navigationLabels = {
+    ...t.tabs,
+    users_admin: import.meta.env.DEV
+      ? lang === 'ar' ? 'إدارة المستخدمين (عرض تجريبي)' : 'User administration (demo)'
+      : t.tabs.users_admin
+  };
+  const navigationEntries = buildNavigationEntries(navigationLabels, {
+    patientCount: patients.length,
+    interventionCount: interventions.length,
+    discrepancyCount: discrepancies.length
+  });
+
+  useBackDismiss(isMobileDrawerOpen, () => setIsMobileDrawerOpen(false));
+
+  const closeMobileDrawer = (fromBack = false) => {
+    const hasDrawerEntry = hasDrawerHistoryMarker(window.history.state);
+    setIsMobileDrawerOpen(false);
+    if (!fromBack && hasDrawerEntry) window.history.back();
+  };
+
+  const navigateFromDrawer = (tab: typeof activeTab) => {
+    if (isMobileDrawerOpen && tab === activeTab) {
+      closeMobileDrawer();
+      return;
+    }
+    if (isMobileDrawerOpen && hasDrawerHistoryMarker(window.history.state)) {
+      setActiveTab(tab, { replace: true });
+      window.history.replaceState({}, '', window.location.href);
+      setIsMobileDrawerOpen(false);
+      return;
+    }
+    setActiveTab(tab);
+    setIsMobileDrawerOpen(false);
+  };
 
   return (
     <div
@@ -210,315 +250,102 @@ export function DashboardLayout({
         isDarkMode ? 'dark bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'
       } font-sans overflow-x-hidden`}
     >
-      {/* Compact Sticky Top App Bar (Android-First Ergonomics: 56px on mobile, 64px on desktop) */}
-      <header className="sticky top-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 shadow-xs transition">
-        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-14 sm:h-16">
-            {/* Left / Start: Brand & Active Screen Context */}
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-gradient-to-tr from-teal-600 to-emerald-400 text-white flex items-center justify-center shadow-sm shadow-teal-500/20 shrink-0">
-                <Stethoscope className="w-4 h-4 sm:w-5 sm:h-5" />
-              </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <h1 className="font-extrabold text-sm sm:text-lg tracking-tight bg-gradient-to-r from-teal-700 to-emerald-600 dark:from-teal-400 dark:to-emerald-300 bg-clip-text text-transparent truncate">
-                    {t.appName}
-                  </h1>
-                  <span className="hidden lg:inline-block text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-100 dark:bg-teal-950 text-teal-800 dark:text-teal-300 border border-teal-200/50">
-                    Medical Mix • Inpatient CDSS
-                  </span>
-                </div>
-                <p className="text-[10px] sm:text-[11px] text-slate-500 truncate">
-                  <span className="md:hidden font-semibold text-teal-700 dark:text-teal-400">
-                    {t.tabs[activeTab]}
-                  </span>
-                  <span className="hidden md:inline">
-                    {t.hospitalName} • {lang === 'ar' ? activeHospitalUser.nameAr : activeHospitalUser.nameEn}
-                  </span>
-                </p>
-              </div>
-            </div>
-
-            {/* Right: Touch-Friendly Action Controls (Minimum 40x40px targets) */}
-            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-              <button
-                onClick={() => setActiveTab('users_admin')}
-                title={
-                  lang === 'ar'
-                    ? 'شاشة المستخدمين ومدير النظام: خالد الشرماني'
-                    : 'Users & System Administrator: Dr. Khaled Al-Shormani'
-                }
-                className={`flex items-center justify-center gap-1.5 min-h-[40px] px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs font-extrabold transition cursor-pointer ${
-                  activeTab === 'users_admin'
-                    ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-sm'
-                    : 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-800 dark:text-amber-300 border-amber-500/40'
-                }`}
-              >
-                <Crown className="w-4 h-4 text-amber-500 shrink-0" />
-                <span className="hidden sm:inline">
-                  {lang === 'ar'
-                    ? `مدير النظام: ${activeHospitalUser.isPrimarySystemAdmin ? 'خالد الشرماني' : activeHospitalUser.nameAr}`
-                    : `Admin: ${activeHospitalUser.isPrimarySystemAdmin ? 'Khaled Al-Shormani' : activeHospitalUser.nameEn}`}
-                </span>
-              </button>
-
-              <button
-                onClick={() => setIsAndroidPermissionsOpen(true)}
-                title={
-                  lang === 'ar'
-                    ? 'أذونات الأندرويد (الملفات، الطباعة PDF، المشاركة، الإنترنت)'
-                    : 'Android Permissions (Files, PDF Print, Share, Internet)'
-                }
-                className="flex items-center justify-center gap-1.5 min-h-[40px] px-2.5 sm:px-3 py-1.5 rounded-xl bg-teal-950/90 dark:bg-teal-950 hover:bg-teal-900 text-emerald-300 border border-teal-700/80 text-xs font-bold transition cursor-pointer"
-              >
-                <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span className="hidden lg:inline">
-                  {lang === 'ar' ? 'أذونات الأندرويد / PDF' : 'Android Permissions'}
-                </span>
-              </button>
-
-              <button
-                onClick={() => setIsGitHubReleaseOpen(true)}
-                title={lang === 'ar' ? 'تثبيت التطبيق وإصدار GitHub' : 'Install App & GitHub Release'}
-                className="flex items-center justify-center gap-1.5 min-h-[40px] px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 text-teal-300 border border-slate-700 text-xs font-bold transition cursor-pointer"
-              >
-                <Download className="w-4 h-4 text-teal-400 shrink-0" />
-                <span className="hidden xl:inline">
-                  {lang === 'ar' ? 'تثبيت التطبيق / GitHub' : 'Install / GitHub'}
-                </span>
-              </button>
-
-              <button
-                onClick={() => setIsSyncAuditOpen(true)}
-                title={lang === 'ar' ? 'Offline Sync Queue' : 'Sync Queue'}
-                className="flex items-center justify-center gap-1.5 min-h-[40px] px-2.5 sm:px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 transition"
-              >
-                <Activity className="w-4 h-4 text-teal-600 shrink-0" />
-                <span className="hidden lg:inline">{lang === 'ar' ? 'Sync Queue' : 'Sync Queue'}</span>
-                {syncQueue.hasPendingSync() ? (
-                  <span className="text-[10px] bg-amber-500 text-white font-mono px-1.5 py-0.2 rounded-full font-bold">
-                    {syncQueue.getPendingCount()}
-                  </span>
-                ) : (
-                  <span className="text-[10px] text-teal-600 dark:text-teal-400 font-bold">✓</span>
-                )}
-              </button>
-
-              <button
-                onClick={() => setIsCopilotOpen(true)}
-                className="flex items-center justify-center gap-1.5 min-h-[40px] px-2.5 sm:px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white text-xs font-bold transition shadow-sm shadow-teal-600/20 active:scale-95"
-              >
-                <Sparkles className="w-4 h-4 text-amber-200 shrink-0" />
-                <span className="hidden sm:inline">Clinical Copilot</span>
-              </button>
-
-              <button
-                onClick={toggleLanguage}
-                title={lang === 'ar' ? 'Switch to English' : 'التبديل إلى Medical Mix عربي/إنجليزي'}
-                className="flex items-center justify-center gap-1 min-h-[40px] min-w-[44px] px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-bold text-slate-700 dark:text-slate-300 transition"
-              >
-                <Globe className="w-3.5 h-3.5 text-teal-600 shrink-0" />
-                <span>{lang === 'ar' ? 'EN' : 'AR'}</span>
-              </button>
-
-              <button
-                onClick={toggleDarkMode}
-                title={isDarkMode ? 'Light Mode' : 'Dark Mode'}
-                className="flex items-center justify-center min-h-[40px] min-w-[40px] p-2 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 transition"
-              >
-                {isDarkMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-slate-600" />}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Desktop Navigation Bar (Hidden on Android Mobile to preserve viewport height) */}
-        <div className="hidden md:block border-t border-slate-100 dark:border-slate-800/80 bg-slate-50/60 dark:bg-slate-900/60">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <nav className="flex items-center gap-1.5 overflow-x-auto py-2 no-scrollbar">
-              <button
-                onClick={() => setActiveTab('patients')}
-                className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition ${
-                  activeTab === 'patients'
-                    ? 'bg-teal-600 text-white shadow-xs'
-                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-200/60 dark:hover:bg-slate-800'
-                }`}
-              >
-                <Users className="w-3.5 h-3.5" />
-                {t.tabs.patients}
-                <span className="text-[10px] bg-white/20 px-1.5 py-0.2 rounded-full font-mono font-bold">
-                  {patients.length}
-                </span>
-              </button>
-
-              <button
-                onClick={() => setActiveTab('guidelines')}
-                className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition ${
-                  activeTab === 'guidelines'
-                    ? 'bg-teal-600 text-white shadow-xs'
-                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-200/60 dark:hover:bg-slate-800'
-                }`}
-              >
-                <BookOpen className="w-3.5 h-3.5" />
-                {t.tabs.guidelines}
-              </button>
-
-              <button
-                onClick={() => setActiveTab('calculators')}
-                className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition ${
-                  activeTab === 'calculators'
-                    ? 'bg-teal-600 text-white shadow-xs'
-                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-200/60 dark:hover:bg-slate-800'
-                }`}
-              >
-                <Calculator className="w-3.5 h-3.5" />
-                {t.tabs.calculators}
-              </button>
-
-              <button
-                onClick={() => setActiveTab('alerts')}
-                className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition ${
-                  activeTab === 'alerts'
-                    ? 'bg-teal-600 text-white shadow-xs'
-                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-200/60 dark:hover:bg-slate-800'
-                }`}
-              >
-                <ShieldAlert className="w-3.5 h-3.5" />
-                {t.tabs.alerts}
-              </button>
-
-              <button
-                onClick={() => setActiveTab('interventions')}
-                className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition ${
-                  activeTab === 'interventions'
-                    ? 'bg-teal-600 text-white shadow-xs'
-                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-200/60 dark:hover:bg-slate-800'
-                }`}
-              >
-                <ClipboardList className="w-3.5 h-3.5" />
-                {t.tabs.interventions}
-                <span className="text-[10px] bg-white/20 px-1.5 py-0.2 rounded-full font-mono font-bold">
-                  {interventions.length}
-                </span>
-              </button>
-
-              <button
-                onClick={() => setActiveTab('reconciliation')}
-                className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition ${
-                  activeTab === 'reconciliation'
-                    ? 'bg-teal-600 text-white shadow-xs'
-                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-200/60 dark:hover:bg-slate-800'
-                }`}
-              >
-                <FileCheck className="w-3.5 h-3.5" />
-                {t.tabs.reconciliation}
-                <span className="text-[10px] bg-white/20 px-1.5 py-0.2 rounded-full font-mono font-bold">
-                  {discrepancies.length}
-                </span>
-              </button>
-
-              <button
-                onClick={() => setActiveTab('training')}
-                className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition ${
-                  activeTab === 'training'
-                    ? 'bg-teal-600 text-white shadow-xs'
-                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-200/60 dark:hover:bg-slate-800'
-                }`}
-              >
-                <GraduationCap className="w-3.5 h-3.5" />
-                {t.tabs.training}
-              </button>
-
-              <button
-                onClick={() => setActiveTab('users_admin')}
-                className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-extrabold whitespace-nowrap transition ${
-                  activeTab === 'users_admin'
-                    ? 'bg-amber-500 text-slate-950 shadow-xs'
-                    : 'text-amber-700 dark:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30'
-                }`}
-              >
-                <Crown className="w-3.5 h-3.5" />
-                {t.tabs.users_admin}
-              </button>
-            </nav>
-          </div>
-        </div>
-
-        {/* Mobile Sub-Switcher when inside grouped tabs (Safety/DRP or MedRec/Training/Users) */}
-        {(isSafetyGroupActive || isMoreGroupActive) && (
-          <div className="md:hidden border-t border-slate-100 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-900/90 px-3 py-1.5">
-            {isSafetyGroupActive ? (
-              <div className="grid grid-cols-2 gap-1.5 bg-slate-200/70 dark:bg-slate-800 p-1 rounded-xl">
-                <button
-                  onClick={() => setActiveTab('alerts')}
-                  className={`py-1.5 px-2 rounded-lg text-[11px] font-extrabold flex items-center justify-center gap-1.5 transition ${
-                    activeTab === 'alerts'
-                      ? 'bg-white dark:bg-slate-900 text-teal-700 dark:text-teal-300 shadow-xs'
-                      : 'text-slate-600 dark:text-slate-400'
-                  }`}
-                >
-                  <ShieldAlert className="w-3.5 h-3.5" />
-                  <span>{lang === 'ar' ? 'فحص التداخلات (DDI & Safety)' : 'DDI & Safety'}</span>
+      <ClinicalAppShell
+        header={
+          <GlobalHeader
+            appName={t.appName}
+            contextLabel={import.meta.env.DEV
+              ? lang === 'ar' ? 'بيئة تطوير تجريبية' : 'Development demo environment'
+              : `${t.hospitalName} • ${lang === 'ar' ? activeHospitalUser.nameAr : activeHospitalUser.nameEn}`}
+            activeLabel={navigationLabels[activeTab]}
+            lang={lang}
+            darkMode={isDarkMode}
+            onToggleLanguage={toggleLanguage}
+            onToggleTheme={toggleDarkMode}
+            onOpenMenu={() => setIsMobileDrawerOpen(true)}
+          >
+            <button
+              type="button"
+              onClick={() => setIsAndroidPermissionsOpen(true)}
+              aria-label={lang === 'ar' ? 'أذونات Android وPDF' : 'Android and PDF permissions'}
+              className="inline-flex min-h-10 items-center gap-2 rounded-clinical border border-clinical-border px-3 text-xs font-semibold text-clinical-text hover:bg-clinical-surface-subtle"
+            >
+              <ShieldCheck aria-hidden="true" className="size-4 text-clinical-teal" />
+              <span>{lang === 'ar' ? 'أذونات Android' : 'Android permissions'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsGitHubReleaseOpen(true)}
+              aria-label={lang === 'ar' ? 'تثبيت التطبيق وإصدار GitHub' : 'Install app and GitHub release'}
+              className="inline-flex min-h-10 items-center gap-2 rounded-clinical border border-clinical-border px-3 text-xs font-semibold text-clinical-text hover:bg-clinical-surface-subtle"
+            >
+              <Download aria-hidden="true" className="size-4 text-clinical-teal" />
+              <span>{lang === 'ar' ? 'تثبيت / GitHub' : 'Install / GitHub'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsSyncAuditOpen(true)}
+              aria-label={lang === 'ar' ? 'قائمة المزامنة دون اتصال' : 'Offline sync queue'}
+              className="inline-flex min-h-10 items-center gap-2 rounded-clinical border border-clinical-border px-3 text-xs font-semibold text-clinical-text hover:bg-clinical-surface-subtle"
+            >
+              <Activity aria-hidden="true" className="size-4 text-clinical-teal" />
+              <span>{lang === 'ar' ? 'قائمة المزامنة' : 'Sync queue'}</span>
+              {syncQueue.hasPendingSync() && <span className="rounded-full bg-clinical-warning-soft px-1.5 text-clinical-warning">{syncQueue.getPendingCount()}</span>}
+            </button>
+          </GlobalHeader>
+        }
+        primarySidebar={<PrimarySidebar entries={navigationEntries} activeTab={activeTab} lang={lang} onNavigate={setActiveTab} />}
+        contextualSidebar={<ContextualSidebar lang={lang} />}
+        mobileBottomNavigation={
+          <MobileBottomNavigation
+            activeTab={activeTab}
+            lang={lang}
+            labels={{
+              patients: t.mobileNav.patients,
+              guidelines: t.mobileNav.guidelines,
+              calculators: t.mobileNav.calculators,
+              alerts: t.mobileNav.alerts,
+              more: lang === 'ar' ? 'المزيد' : 'More'
+            }}
+            onNavigate={setActiveTab}
+            onOpenDrawer={() => setIsMobileDrawerOpen(true)}
+          />
+        }
+        mobileDrawer={
+          <MobileNavigationDrawer
+            open={isMobileDrawerOpen}
+            entries={navigationEntries}
+            activeTab={activeTab}
+            lang={lang}
+            onNavigate={navigateFromDrawer}
+            onRequestClose={closeMobileDrawer}
+            utilityActions={
+              <>
+                <button type="button" onClick={() => { setIsAndroidPermissionsOpen(true); closeMobileDrawer(); }} className="flex min-h-11 items-center gap-2 rounded-clinical border border-clinical-border px-3 text-start text-sm text-clinical-text">
+                  <ShieldCheck aria-hidden="true" className="size-4 text-clinical-teal" />
+                  {lang === 'ar' ? 'أذونات Android وPDF' : 'Android and PDF permissions'}
                 </button>
-                <button
-                  onClick={() => setActiveTab('interventions')}
-                  className={`py-1.5 px-2 rounded-lg text-[11px] font-extrabold flex items-center justify-center gap-1.5 transition ${
-                    activeTab === 'interventions'
-                      ? 'bg-white dark:bg-slate-900 text-teal-700 dark:text-teal-300 shadow-xs'
-                      : 'text-slate-600 dark:text-slate-400'
-                  }`}
-                >
-                  <ClipboardList className="w-3.5 h-3.5" />
-                  <span>
-                    {lang === 'ar' ? `توثيق DRP & SOAP (${interventions.length})` : `DRP & SOAP (${interventions.length})`}
-                  </span>
+                <button type="button" onClick={() => { setIsGitHubReleaseOpen(true); closeMobileDrawer(); }} className="flex min-h-11 items-center gap-2 rounded-clinical border border-clinical-border px-3 text-start text-sm text-clinical-text">
+                  <Download aria-hidden="true" className="size-4 text-clinical-teal" />
+                  {lang === 'ar' ? 'تثبيت التطبيق / GitHub' : 'Install app / GitHub'}
                 </button>
-              </div>
-            ) : (
-              <div className="grid grid-cols-3 gap-1.5 bg-slate-200/70 dark:bg-slate-800 p-1 rounded-xl">
-                <button
-                  onClick={() => setActiveTab('users_admin')}
-                  className={`py-1.5 px-2 rounded-lg text-[11px] font-extrabold flex items-center justify-center gap-1 transition ${
-                    activeTab === 'users_admin'
-                      ? 'bg-amber-500 text-slate-950 shadow-xs'
-                      : 'text-slate-700 dark:text-slate-300'
-                  }`}
-                >
-                  <Crown className="w-3.5 h-3.5" />
-                  <span className="truncate">{lang === 'ar' ? 'مدير النظام: خالد الشرماني' : 'Admin & Users'}</span>
+                <button type="button" onClick={() => { setIsSyncAuditOpen(true); closeMobileDrawer(); }} className="flex min-h-11 items-center gap-2 rounded-clinical border border-clinical-border px-3 text-start text-sm text-clinical-text">
+                  <Activity aria-hidden="true" className="size-4 text-clinical-teal" />
+                  {lang === 'ar' ? 'قائمة المزامنة' : 'Sync queue'}
                 </button>
-                <button
-                  onClick={() => setActiveTab('reconciliation')}
-                  className={`py-1.5 px-2 rounded-lg text-[11px] font-extrabold flex items-center justify-center gap-1 transition ${
-                    activeTab === 'reconciliation'
-                      ? 'bg-white dark:bg-slate-900 text-teal-700 dark:text-teal-300 shadow-xs'
-                      : 'text-slate-600 dark:text-slate-400'
-                  }`}
-                >
-                  <FileCheck className="w-3.5 h-3.5" />
-                  <span className="truncate">
-                    {lang === 'ar' ? `MedRec (${discrepancies.length})` : `MedRec (${discrepancies.length})`}
-                  </span>
-                </button>
-                <button
-                  onClick={() => setActiveTab('training')}
-                  className={`py-1.5 px-2 rounded-lg text-[11px] font-extrabold flex items-center justify-center gap-1 transition ${
-                    activeTab === 'training'
-                      ? 'bg-white dark:bg-slate-900 text-teal-700 dark:text-teal-300 shadow-xs'
-                      : 'text-slate-600 dark:text-slate-400'
-                  }`}
-                >
-                  <GraduationCap className="w-3.5 h-3.5" />
-                  <span className="truncate">{lang === 'ar' ? 'حالات البورد' : 'BCPS Cases'}</span>
-                </button>
-              </div>
-            )}
+              </>
+            }
+          />
+        }
+      >
+      <div className="px-3 py-4 pb-24 sm:px-6 sm:py-6 md:pb-8 lg:px-8">
+        {import.meta.env.DEV && (
+          <div role="note" className="mb-4 rounded-clinical border border-clinical-warning/30 bg-clinical-warning-soft px-3 py-2 text-xs font-semibold text-clinical-warning">
+            {lang === 'ar'
+              ? 'بيانات البداية المرفقة اصطناعية للعرض والتطوير فقط — ليست سجلات حقيقية ولا تُستخدم للرعاية.'
+              : 'Bundled initial records are synthetic demo fixtures only — not real records and not for patient care.'}
           </div>
         )}
-      </header>
-
-      {/* Main Container — pb-24 on mobile ensures bottom nav never obscures content */}
-      <main className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 pb-24 md:pb-8">
         {/* TAB 1: Patients & Inpatient Rounds */}
         {activeTab === 'patients' && (
           <div className="space-y-4 sm:space-y-6">
@@ -912,7 +739,8 @@ export function DashboardLayout({
 
         {/* TAB 8: Users & System Administrator Screen (خالد الشرماني) */}
         {activeTab === 'users_admin' && <UsersAdminPanel lang={lang} />}
-      </main>
+      </div>
+      </ClinicalAppShell>
 
       {/* Floating Copilot Trigger Button (Positioned above Android bottom nav on mobile) */}
       <div className="fixed bottom-20 md:bottom-6 left-4 md:left-6 z-30">
@@ -927,109 +755,6 @@ export function DashboardLayout({
           <span className="sm:hidden">Copilot</span>
         </button>
       </div>
-
-      {/* ANDROID BOTTOM NAVIGATION BAR (Thumb-Zone Ergonomics, 5 Primary Destinations) */}
-      <nav
-        aria-label="Mobile Bottom Navigation"
-        className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-lg border-t border-slate-200 dark:border-slate-800 pb-safe shadow-[0_-4px_20px_rgba(0,0,0,0.06)]"
-      >
-        <div className="grid grid-cols-5 h-16 max-w-md mx-auto px-1">
-          {/* 1. Inpatient Rounds */}
-          <button
-            onClick={() => setActiveTab('patients')}
-            className={`flex flex-col items-center justify-center gap-0.5 rounded-xl transition ${
-              activeTab === 'patients'
-                ? 'text-teal-600 dark:text-teal-400 font-extrabold'
-                : 'text-slate-500 dark:text-slate-400 font-medium'
-            }`}
-          >
-            <div
-              className={`px-3 py-0.5 rounded-full transition ${
-                activeTab === 'patients' ? 'bg-teal-100/80 dark:bg-teal-950/80' : ''
-              }`}
-            >
-              <Users className="w-4 h-4" />
-            </div>
-            <span className="text-[10px] leading-tight truncate max-w-full">{t.mobileNav.patients}</span>
-          </button>
-
-          {/* 2. Reference Simulator & Books */}
-          <button
-            onClick={() => setActiveTab('guidelines')}
-            className={`flex flex-col items-center justify-center gap-0.5 rounded-xl transition ${
-              activeTab === 'guidelines'
-                ? 'text-teal-600 dark:text-teal-400 font-extrabold'
-                : 'text-slate-500 dark:text-slate-400 font-medium'
-            }`}
-          >
-            <div
-              className={`px-3 py-0.5 rounded-full transition ${
-                activeTab === 'guidelines' ? 'bg-teal-100/80 dark:bg-teal-950/80' : ''
-              }`}
-            >
-              <BookOpen className="w-4 h-4" />
-            </div>
-            <span className="text-[10px] leading-tight truncate max-w-full">{t.mobileNav.guidelines}</span>
-          </button>
-
-          {/* 3. PK & Clinical Calculators */}
-          <button
-            onClick={() => setActiveTab('calculators')}
-            className={`flex flex-col items-center justify-center gap-0.5 rounded-xl transition ${
-              activeTab === 'calculators'
-                ? 'text-teal-600 dark:text-teal-400 font-extrabold'
-                : 'text-slate-500 dark:text-slate-400 font-medium'
-            }`}
-          >
-            <div
-              className={`px-3 py-0.5 rounded-full transition ${
-                activeTab === 'calculators' ? 'bg-teal-100/80 dark:bg-teal-950/80' : ''
-              }`}
-            >
-              <Calculator className="w-4 h-4" />
-            </div>
-            <span className="text-[10px] leading-tight truncate max-w-full">{t.mobileNav.calculators}</span>
-          </button>
-
-          {/* 4. Safety Screening & DRP/SOAP */}
-          <button
-            onClick={() => setActiveTab(activeTab === 'alerts' ? 'interventions' : 'alerts')}
-            className={`flex flex-col items-center justify-center gap-0.5 rounded-xl transition ${
-              isSafetyGroupActive
-                ? 'text-teal-600 dark:text-teal-400 font-extrabold'
-                : 'text-slate-500 dark:text-slate-400 font-medium'
-            }`}
-          >
-            <div
-              className={`px-3 py-0.5 rounded-full transition ${
-                isSafetyGroupActive ? 'bg-teal-100/80 dark:bg-teal-950/80' : ''
-              }`}
-            >
-              <ShieldAlert className="w-4 h-4" />
-            </div>
-            <span className="text-[10px] leading-tight truncate max-w-full">{t.mobileNav.alerts}</span>
-          </button>
-
-          {/* 5. Users Admin (Khaled Al-Shormani), MedRec & Board Cases */}
-          <button
-            onClick={() => setActiveTab(activeTab === 'users_admin' ? 'reconciliation' : 'users_admin')}
-            className={`flex flex-col items-center justify-center gap-0.5 rounded-xl transition ${
-              isMoreGroupActive
-                ? 'text-amber-600 dark:text-amber-400 font-extrabold'
-                : 'text-slate-500 dark:text-slate-400 font-medium'
-            }`}
-          >
-            <div
-              className={`px-3 py-0.5 rounded-full transition ${
-                isMoreGroupActive ? 'bg-amber-100/80 dark:bg-amber-950/80' : ''
-              }`}
-            >
-              <Crown className="w-4 h-4" />
-            </div>
-            <span className="text-[10px] leading-tight truncate max-w-full">{t.mobileNav.more}</span>
-          </button>
-        </div>
-      </nav>
 
       {/* Copilot Dialog */}
       <CopilotDialog
