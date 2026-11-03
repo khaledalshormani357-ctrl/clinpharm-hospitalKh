@@ -5,6 +5,7 @@ export const APP_TABS = [
   'alerts',
   'interventions',
   'guidelines',
+  'encyclopedia',
   'training',
   'users_admin',
 ] as const;
@@ -17,6 +18,7 @@ export type NavigationIcon =
   | 'alerts'
   | 'interventions'
   | 'guidelines'
+  | 'encyclopedia'
   | 'training'
   | 'users_admin';
 
@@ -34,6 +36,7 @@ export const TAB_ROUTES: Record<AppTab, string> = {
   alerts: '/alerts',
   interventions: '/interventions',
   guidelines: '/guidelines',
+  encyclopedia: '/encyclopedia',
   training: '/training',
   users_admin: '/users-admin',
 };
@@ -46,7 +49,8 @@ export function tabFromHash(hash: string): AppTab | null {
   const path = hash.startsWith('#') ? hash.slice(1) : hash;
   const normalized = path.split('?')[0].replace(/\/$/, '') || '/';
   const entry = APP_TABS.find(tab => TAB_ROUTES[tab] === normalized);
-  return entry ?? null;
+  if (entry) return entry;
+  return normalized.startsWith(`${TAB_ROUTES.encyclopedia}/`) ? 'encyclopedia' : null;
 }
 
 export function buildNavigationEntries(

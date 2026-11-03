@@ -7,6 +7,7 @@ import {
   ClipboardList,
   FileCheck,
   GraduationCap,
+  Network,
   ShieldAlert,
   Users,
   type LucideIcon,
@@ -21,6 +22,7 @@ const ICONS: Record<NavigationEntry['icon'], LucideIcon> = {
   alerts: ShieldAlert,
   interventions: ClipboardList,
   guidelines: BookOpen,
+  encyclopedia: Network,
   training: GraduationCap,
   users_admin: Crown,
 };

@@ -1,5 +1,8 @@
 import { VerbatimBook, VerbatimChapter, LibrarySearchMatch } from './libraryTypes';
-import { getSyncedFullBooksSync } from '../googleDrive/fullBookIdb';
+import {
+  getSyncedFullBookByIdSync,
+  getSyncedFullBooksSync
+} from '../googleDrive/fullBookIdb';
 import { dipiroHeartFailureChapter } from './monographs/dipiroCardioMonograph';
 import { dipiroAdditionalChapters } from './monographs/dipiroAllChaptersMonograph';
 import { accpCardiology2026Chapters } from './monographs/accpCardiology2026Monograph';
@@ -192,6 +195,52 @@ const CHAPTER_ID_ALIAS_MAP: Record<string, string> = {
   'hosp-iv-electrolytes-compendium': 'hospital-compendium-protocols'
 };
 
+export interface VerbatimBookSourceMetadata {
+  bookId: string;
+  title: string;
+  edition: string;
+  sourceType?: VerbatimBook['sourceType'];
+  processingStatus?: VerbatimBook['processingStatus'];
+  sha256?: string;
+  originalPageCount?: number;
+  extractedTextPageCount?: number;
+  unprocessedPageCount?: number;
+}
+
+/**
+ * Reads provenance for one book without materializing every chapter or pack in memory.
+ * The static fallback mirrors the embedded_synthetic/not_imported metadata added by
+ * getAllVerbatimBooks when no imported record is present.
+ */
+export function getVerbatimBookSourceMetadataById(
+  bookId: string
+): VerbatimBookSourceMetadata | undefined {
+  const staticBook = VERBATIM_BOOKS.find(book => book.id === bookId);
+  const synced = getSyncedFullBookByIdSync(bookId);
+  if (synced) {
+    return {
+      bookId: synced.bookId,
+      title: synced.displayTitle || synced.customTitle || synced.sourceFileName || synced.fileName,
+      edition: staticBook?.edition || 'Unavailable',
+      sourceType: synced.sourceType,
+      processingStatus: synced.processingStatus,
+      sha256: synced.sha256,
+      originalPageCount: synced.originalPageCount ?? synced.totalPages,
+      extractedTextPageCount: synced.extractedTextPageCount,
+      unprocessedPageCount: synced.unprocessedPageCount
+    };
+  }
+
+  if (!staticBook) return undefined;
+  return {
+    bookId: staticBook.id,
+    title: staticBook.title,
+    edition: staticBook.edition,
+    sourceType: 'embedded_synthetic',
+    processingStatus: 'not_imported'
+  };
+}
+
 export function getAllVerbatimBooks(): VerbatimBook[] {
   const syncedRecords = getSyncedFullBooksSync();
   if (syncedRecords.length === 0) {
@@ -220,7 +269,7 @@ export function getAllVerbatimBooks(): VerbatimBook[] {
     const statusLabel = isEmbedded
       ? 'Embedded Offline Summary — NOT the original PDF'
       : synced.processingStatus === 'verified_complete'
-      ? `Verified Complete PDF (${synced.totalPages} Pages)`
+      ? `All Pages Indexed (${synced.totalPages} Pages)`
       : synced.processingStatus === 'needs_ocr'
       ? `Scanned PDF — Needs OCR (${synced.totalPages} Pages)`
       : `Partially Extracted PDF (${synced.extractedTextPageCount ?? 0}/${synced.totalPages} Pages)`;
@@ -262,7 +311,7 @@ export function getAllVerbatimBooks(): VerbatimBook[] {
         edition: isEmbedded
           ? 'Embedded Offline Summary — NOT the original PDF'
           : synced.processingStatus === 'verified_complete'
-          ? `Verified Complete PDF (${synced.totalPages} Pages)`
+          ? `All Pages Indexed (${synced.totalPages} Pages)`
           : `Imported PDF (${synced.totalPages} Pages • ${synced.processingStatus || 'partially_complete'})`,
         editors: isEmbedded ? 'Built-in Summary' : 'Original PDF Textbook',
         publisher: synced.sourceType === 'local_file_pdf' ? 'Local PDF Import' : 'Google Drive PDF Import',

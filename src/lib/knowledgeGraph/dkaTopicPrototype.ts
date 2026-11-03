@@ -46,9 +46,9 @@ export const DKA_CLINICAL_TOPIC: ClinicalTopic = {
   specialty: 'Endocrinology & Metabolism',
   specialtyAr: 'أمراض الغدد الصماء والاستقلاب والعناية المركزة',
   descriptionEn:
-    'Life-threatening acute metabolic emergency defined by the triad of hyperglycemia (or euglycemia in SGLT2i/pregnancy), ketonemia (beta-hydroxybutyrate >= 3.0 mmol/L), and high-anion-gap metabolic acidosis (pH <= 7.30, HCO3- <= 18 mEq/L, Anion Gap > 12 mEq/L). Synthesized strictly from ACCP Updates in Therapeutics 2026 Vol 2, DiPiro Pharmacotherapy 13th Ed, Hospital Dosing Compendium, and Pharmacotherapy Casebook 13th Ed.',
+    'Life-threatening acute metabolic emergency defined by the triad of hyperglycemia (or euglycemia in SGLT2i/pregnancy), ketonemia (beta-hydroxybutyrate >= 3.0 mmol/L), and high-anion-gap metabolic acidosis (pH <= 7.30, HCO3- <= 18 mEq/L, Anion Gap > 12 mEq/L). Contributing source records listed for this topic: ACCP Updates in Therapeutics 2026 Vol 2, DiPiro Pharmacotherapy 13th Ed, Hospital Dosing Compendium, and Pharmacotherapy Casebook 13th Ed.',
   descriptionAr:
-    'حالة طوارئ استقلابية حادة مهددة للحياة تتميز بالثلاثي التشخيصي: فرط سكر الدم (أو سكر طبيعي في euDKA المرتبط بمثبطات SGLT2 أو الحمل)، فرط كيتون الدم (بيتا هيدروكسي بيوتيرات >= 3.0 mmol/L)، وحماض استقلابي مرتفع الفجوة الأنيونية (pH <= 7.30، البيكربونات <= 18 mEq/L، الفجوة الأنيونية > 12 mEq/L). مستخلصة حصرياً من المراجع الموثقة في المكتبة.',
+    'حالة طوارئ استقلابية حادة مهددة للحياة تتميز بالثلاثي التشخيصي: فرط سكر الدم (أو سكر طبيعي في euDKA المرتبط بمثبطات SGLT2 أو الحمل)، فرط كيتون الدم (بيتا هيدروكسي بيوتيرات >= 3.0 mmol/L)، وحماض استقلابي مرتفع الفجوة الأنيونية (pH <= 7.30، البيكربونات <= 18 mEq/L، الفجوة الأنيونية > 12 mEq/L). تسجل بيانات هذا الموضوع المصادر التالية كمراجع مساهمة: ACCP Updates in Therapeutics 2026 Vol 2 وDiPiro Pharmacotherapy 13th Ed وHospital Dosing Compendium وPharmacotherapy Casebook 13th Ed.',
   clinicalUrgency: 'emergent_icu',
   prototypeScope: 'full_monograph',
   status: 'conflicting_evidence',
@@ -246,7 +246,7 @@ export const DKA_CLINICAL_TOPIC: ClinicalTopic = {
       sectionKey: 'clinical_guidelines',
       sectionOrder: 17,
       titleEn: '17. Clinical Guidelines & Consensus Recommendations',
-      titleAr: '17. التوصيات والإرشادات السريرية المعتمدة',
+      titleAr: '17. التوصيات والإرشادات السريرية المسجلة',
       availabilityStatus: 'populated',
       populatedStatementCount: 2,
       sourceIds: ['accp-2026-vol2', 'dipiro-13th-ed', 'hospital-compendium']
@@ -256,7 +256,7 @@ export const DKA_CLINICAL_TOPIC: ClinicalTopic = {
       topicId: 'topic-dka',
       sectionKey: 'references_evidence',
       sectionOrder: 18,
-      titleEn: '18. Contributing References & Verbatim Evidence Index',
+      titleEn: '18. Contributing References & Source Metadata',
       titleAr: '18. المراجع والمصادر العلمية الداعمة',
       availabilityStatus: 'populated',
       populatedStatementCount: 1,

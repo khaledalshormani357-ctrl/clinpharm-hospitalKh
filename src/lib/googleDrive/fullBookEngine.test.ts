@@ -23,10 +23,49 @@ import {
   type SyncedFullBookRecord,
 } from './fullBookIdb';
 import { seedSingleEmbeddedBookOffline } from './embeddedBookCompiler';
+import { verifyOfflineBookIntegrity } from './pdfOfflineStorageService';
 
 function createValidPdfBuffer(tag = 'test-pdf-payload'): ArrayBuffer {
   const text = `%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\n% ${tag}\n%%EOF`;
   return new TextEncoder().encode(text).buffer as ArrayBuffer;
+}
+
+function createIntegrityRecord(bookId: string, sha256: string, pdfBytes: ArrayBuffer): SyncedFullBookRecord {
+  const pageText = 'Synthetic test page for PDF byte-integrity checks.';
+  return {
+    bookId,
+    driveFileId: `drive-${bookId}`,
+    fileName: `${bookId}.pdf`,
+    sourceFileName: `${bookId}.pdf`,
+    displayTitle: 'Synthetic integrity test fixture',
+    mimeType: 'application/pdf',
+    fileSize: pdfBytes.byteLength,
+    sha256,
+    totalPages: 1,
+    originalPageCount: 1,
+    processedPageCount: 1,
+    extractedTextPageCount: 1,
+    ocrPageCount: 0,
+    unprocessedPageCount: 0,
+    blankPageCount: 0,
+    totalChapters: 1,
+    totalCharacters: pageText.length,
+    sourceType: 'google_drive_pdf',
+    processingStatus: 'verified_complete',
+    syncedAt: new Date().toISOString(),
+    chapters: [],
+    pages: [{
+      pageNumber: 1,
+      text: pageText,
+      extractedText: pageText,
+      extractionMethod: 'native_text',
+      extractionStatus: 'extracted',
+      chapterId: 'synthetic-chapter-1',
+      chapterTitle: 'Synthetic chapter',
+      sectionId: 'synthetic-section-1',
+      lineCount: 1
+    }]
+  };
 }
 
 interface MockPdfTextItem {
@@ -809,5 +848,29 @@ describe('ClinPharm Hospital Full Medical PDF Ingestion Suite (16 Mandatory Scen
       /revoke\s+all\s+on\s+public\.books,\s*public\.book_chapters,\s*public\.book_pages,\s*public\.book_sections,\s*public\.book_tables,\s*public\.book_import_jobs\s+from\s+anon/i
     );
     expect(sql).toContain('public.is_admin() or owner_id = auth.uid()');
+  });
+
+  it('17. verifies cached PDF bytes against their real SHA-256 and never trusts a stored hash without the bytes', async () => {
+    const validBytes = createValidPdfBuffer('integrity-match');
+    const validHash = await computeSha256Hex(validBytes);
+    await saveSyncedFullBook(createIntegrityRecord('integrity-match', validHash, validBytes), validBytes);
+    const validResult = await verifyOfflineBookIntegrity('integrity-match');
+    expect(validResult.isVerifiedOriginalPdf).toBe(true);
+    expect(validResult.isValidPdfHeader).toBe(true);
+
+    const actualBytes = createValidPdfBuffer('integrity-tampered');
+    const wrongHash = await computeSha256Hex(createValidPdfBuffer('different-pdf-payload'));
+    await saveSyncedFullBook(createIntegrityRecord('integrity-tampered', wrongHash, actualBytes), actualBytes);
+    const mismatchResult = await verifyOfflineBookIntegrity('integrity-tampered');
+    expect(mismatchResult.isVerifiedOriginalPdf).toBe(false);
+    expect(mismatchResult.messageEn).toContain('does not match');
+
+    const missingBytes = createValidPdfBuffer('integrity-bytes-not-saved');
+    const storedHash = await computeSha256Hex(missingBytes);
+    await saveSyncedFullBook(createIntegrityRecord('integrity-missing-bytes', storedHash, missingBytes));
+    const missingResult = await verifyOfflineBookIntegrity('integrity-missing-bytes');
+    expect(missingResult.hasBinaryPdf).toBe(false);
+    expect(missingResult.isVerifiedOriginalPdf).toBe(false);
+    expect(missingResult.messageEn).toContain('bytes are not cached');
   });
 });

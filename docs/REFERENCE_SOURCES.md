@@ -1,25 +1,29 @@
-# Reference-source layers and UI labels
+# طبقات مصادر المراجع وتسمياتها
 
-ClinPharm currently contains distinct source layers. A record must retain its origin; content from one layer must not be presented as though it came from another. These labels describe provenance, not clinical endorsement.
+توجد في ClinPharm طبقات مصدر مختلفة. يجب أن تحتفظ كل سجلات المحتوى بأصلها، وألا يُعرض محتوى طبقة وكأنه ينتمي إلى طبقة أخرى. تسميات المصدر تصف provenance فقط، ولا تمثل اعتمادًا أو توصية علاجية.
 
-## A. Extracted book packs
+## أ. حزم الكتب المستخرجة
 
-The six compressed packs under `public/books-vault/` (with `index.json`) are DiPiro 13th Edition, ACCP Volume 1, ACCP Volume 2, ACCP Cardiology 2026, Stockley's Drug Interactions, and Clinical Casebook. They are loaded through `fullBookEngine` / `fullBookIdb` into IndexedDB. The packs total about 10 MB compressed; decompressed content is much larger. Their records may include a book title, chapters, page counts, structured tables, a diagnostic report, and a SHA-256 field.
+يوجد ست حزم مضغوطة في `public/books-vault/` مع `index.json`: DiPiro 13th Edition، ACCP Volume 1، ACCP Volume 2، ACCP Cardiology 2026، Stockley's Drug Interactions، وClinical Casebook. تُحمّل الحزم عبر `fullBookEngine` و`fullBookIdb` إلى IndexedDB. يحتوي الفهرس على عناوين وعدد صفحات وحقول source/status وقيم SHA-256.
 
-**UI label:** `Extracted book` (or the localized equivalent), with the book, chapter, and page only when those values exist. Show hash availability as metadata only. `sha256` identifies bytes; it does not by itself prove that extracted text is verbatim, complete, clinically reviewed, or guideline-endorsed. Only apply the application's source-state label when the actual record fields support it (`sourceType: google_drive_pdf` and `processingStatus: verified_complete`); otherwise show the actual state or `Source metadata unavailable`.
+**تسمية الواجهة:** «كتاب مستخرج» (أو ترجمتها)، مع عنوان/فصل/صفحة فقط إن توفرت الحقول. اعرض hash بوصفه metadata لا دليلًا على دقة المحتوى. `processingStatus: verified_complete` يصف معالجة الصفحات في سجل الاستيراد؛ لا يثبت وحده سلامة الملف أو حرفية النص أو اكتماله السريري أو مراجعته أو اعتماده. لا يوصف فحص الملف بأنه ناجح إلا إذا توفرت بايتات PDF، ونجح التحقق من توقيع `%PDF-`، وطابقت SHA-256 المعاد حسابها من هذه البايتات قيمة السجل. إذا لم تتوفر البايتات، تبقى الحالة غير مفحوصة.
 
-## B. Hand-written embedded monographs
+تحدد حقول `sourceType` طبقة المصدر: `google_drive_pdf` أو `local_file_pdf` تشير إلى PDF مستورد، و`embedded_synthetic` إلى ملخص مضمّن، و`unverified_legacy` إلى محتوى قديم غير موثّق. لا تستنتج طبقة أقوى من العنوان أو اسم الملف أو قيمة hash منفردة.
 
-The 13 TypeScript monograph files in `src/lib/library/monographs/` (about 575 KB) are hand-written embedded summaries, not original book text. A number of records set `isVerbatimSource: true`, but that flag is not evidence that the content is verbatim. The library also classifies these as `embedded_synthetic` / `embedded_summary`.
+## ب. الملخصات المضمّنة
 
-**Required UI label:** `Embedded summary — not original source text`. Never label this layer `verbatim`, `original`, or `verified`; do not place it in an authoritative extracted dosing table.
+توجد 13 ملفات TypeScript للـmonographs في `src/lib/library/monographs/` (نحو 575 KB بحسب جرد المستودع). هي ملخصات مضمّنة وليست النص الأصلي للكتاب. وجود حقل `isVerbatimSource: true` لا يثبت أن المحتوى حرفي.
 
-## C. Other structured data
+**التسمية المطلوبة:** `Embedded summary — not original source text` / «ملخص مضمّن — ليس نص المصدر الأصلي». لا توسَم هذه الطبقة بأنها `verbatim` أو `original` أو `verified`، ولا تُعرض كجدول جرعات مقتبس حرفيًا من مصدر أصلي.
 
-This layer includes `src/lib/clinicalReferences.ts`, the DKA and heart-failure knowledge-graph prototypes in `src/lib/knowledgeGraph/`, and the Supabase schemas/migrations. These are not interchangeable with the extracted book packs. Migration `0003` defines book tables; migration `0004` defines topics/drugs/dosing tables but is not applied and must not be represented as an available clinical database.
+## ج. السجلات المنظمة الأخرى
 
-**UI label:** `Knowledge graph record` for records from the prototype repository; use source-specific labels for reference metadata only when the underlying fields establish them. A database schema or an unapplied migration is not itself a clinical content source. For missing or ambiguous provenance, display `Source metadata unavailable` rather than infer a stronger claim.
+تشمل هذه الطبقة `src/lib/clinicalReferences.ts`، وسجلات الموضوعات في `src/lib/knowledgeGraph/`، ومخططات Supabase. لا تساوي هذه البيانات حزم الكتب المستخرجة. ترحيل `0003` يعرّف جداول الكتب؛ أما `0004` فيعرّف مخطط الموضوعات/الأدوية/الجرعات لكنه غير مطبق، فلا يجوز تمثيله كقاعدة سريرية متاحة.
 
-## Implementation rule
+**التسمية المطلوبة:** `Knowledge graph record` / «سجل شبكة معرفة» للسجلات المأخوذة من المستودع الأولي. لا يتحول `status: verified` في سجل نموذج أولي إلى شارة مراجعة سريرية أو إلى مصدر كتاب أصلي. عند نقص provenance أو التباسه، اعرض `Source metadata unavailable` / «بيانات المصدر غير متاحة» بدل استنتاج أقوى.
 
-Derive provenance labels from the record's real `sourceType`, `processingStatus`, and other source fields. Treat `sourceType: unverified_legacy` as unverified legacy content, not as an extracted original. Do not infer provenance from a title, a filename, `isVerbatimSource`, a hash alone, or the presence of a schema. Preserve source fields when displaying or searching content, and report records whose layer cannot be determined instead of relabeling or fabricating it.
+## قاعدة التطبيق
+
+استمد تسمية الطبقة من حقول `sourceType` و`processingStatus` وmetadata المصدر الفعلية. تعامل مع `unverified_legacy` بوصفه محتوى legacy غير متحقق، ولا تستنتج provenance من العنوان أو اسم الملف أو `isVerbatimSource` أو قيمة hash وحدها أو وجود schema. احتفظ ببيانات المصدر عند العرض والبحث، وأظهر نقصها بدل اختلاقه.
+
+`verified_complete` لا يعني «تم التحقق سريريًا». سجلات PDF التي لا تتوفر بايتاتها لإعادة حساب البصمة تعرض بطبقة «كتاب أصلي مستخرج» وحالة `pending-review` إلى حين التحقق من البايتات؛ ولا تعني هذه الحالة مراجعة سريرية.

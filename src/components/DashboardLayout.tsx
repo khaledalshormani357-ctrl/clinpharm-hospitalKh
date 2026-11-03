@@ -58,6 +58,7 @@ import { GlobalHeader } from './navigation/GlobalHeader';
 import { MobileBottomNavigation } from './navigation/MobileBottomNavigation';
 import { MobileNavigationDrawer } from './navigation/MobileNavigationDrawer';
 import { PrimarySidebar } from './navigation/PrimarySidebar';
+import { ClinicalEncyclopediaPage } from './clinical-encyclopedia/ClinicalEncyclopediaPage';
 
 interface Props {
   patients: Patient[];
@@ -338,6 +339,9 @@ export function DashboardLayout({
           />
         }
       >
+      {activeTab === 'encyclopedia' ? (
+        <ClinicalEncyclopediaPage lang={lang} onOpenReference={handleOpenLocalReference} />
+      ) : (
       <div className="px-3 py-4 pb-24 sm:px-6 sm:py-6 md:pb-8 lg:px-8">
         {import.meta.env.DEV && (
           <div role="note" className="mb-4 rounded-clinical border border-clinical-warning/30 bg-clinical-warning-soft px-3 py-2 text-xs font-semibold text-clinical-warning">
@@ -740,6 +744,7 @@ export function DashboardLayout({
         {/* TAB 8: Users & System Administrator Screen (خالد الشرماني) */}
         {activeTab === 'users_admin' && <UsersAdminPanel lang={lang} />}
       </div>
+      )}
       </ClinicalAppShell>
 
       {/* Floating Copilot Trigger Button (Positioned above Android bottom nav on mobile) */}

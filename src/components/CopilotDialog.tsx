@@ -81,33 +81,32 @@ export function CopilotDialog({
     {
       id: 'm-1',
       sender: 'assistant',
-      modelBadge: 'NotebookLM Grounded AI • Strict Reference Mode',
+      modelBadge: 'Clinical reference mode • verify source details',
       text:
         lang === 'ar'
-          ? `أهلاً بك زميلي الـ Clinical Pharmacist في **ClinPharm NotebookLM AI** (نظام الاستدلال المرجعي الموثّق الصارم — بدون أي تأليف خارج المراجع).
-أنا مرتبط مباشرةً بـ **${allBooks.length} مراجع إكلينيكية معتمدة (${totalChaptersCount} فصلاً كاملاً بالنص الأصلي وجداول الجرعات)**:
-• **[1] Stockley’s Drug Interactions** (قاعدة بيانات التعارضات الدوائية المعتمدة • Drive ID: \`1eg07NXxWYgJq0NxLf0Vim1JlV7KTu16S\`)
-• **[2] DiPiro’s Pharmacotherapy (13th Ed)** — الفيزيولوجيا المرضية والخوارزميات العلاجية الكاملة
-• **[3] ACCP/ASHP Cardiology Pharmacy (BCCP 2026)** — الفصول الستة الكاملة لصيدلة القلب والعناية التاجية
-• **[4] ACCP Updates in Therapeutics® 2026 (Vol. 1 & Vol. 2)** — الفصول 1–22 الكاملة للبورد الأمريكي (BCPS)
+          ? `أهلاً بك في **ClinPharm Clinical Reference Assistant**. هذا المساعد يستخدم سجلات المراجع المتاحة ويجب أن يوضح نقص المصدر أو مستوى الدليل عند غيابه.
+أنا أستخدم **${allBooks.length} سجلات مراجع سريرية داخل التطبيق (${totalChaptersCount} سجلاً للفصول والجداول)**. قد تتضمن هذه البيانات ملخصات مضمّنة أو نصًا مستخرجًا؛ لا أفترض أن أي مقتطف حرفي أو مُراجع ما لم يثبت ذلك في بيانات المصدر:
+• **[1] Stockley’s Drug Interactions** (سجل مرجع للتداخلات الدوائية)
+• **[2] DiPiro’s Pharmacotherapy (13th Ed)**
+• **[3] ACCP/ASHP Cardiology Pharmacy (BCCP 2026)**
+• **[4] ACCP Updates in Therapeutics® 2026 (Vol. 1 & Vol. 2)**
 • **[5] Pharmacotherapy Casebook & Bedside PPCP Guide** — معيار Schwinghammer e-Casebook
 • **[6] Hospital Clinical Dosing Compendium & ICU Stewardship** — جداول التسريب الوريدي والغسيل الكلوي
 
-كل إجابة أقدمها تكون **مسندة بالترقيم \`[1]\`، \`[2]\`، \`[3]\` إلى الفصل والصفحة والنص الحرفي من المرجع** مع إمكانية استعراض الفقرة الأصلية المقتبسة تحت كل إجابة مباشرةً.`
-          : `Welcome Colleague to **ClinPharm NotebookLM AI** (Strict Source-Grounded Clinical Reference Engine — Zero Hallucination Policy).
-Every response is synthesized strictly from your **${allBooks.length} Accredited In-App Medical Textbooks (${totalChaptersCount} unabridged chapters & dosing tables)**:
-• **[1] Stockley’s Drug Interactions** (Authoritative PK/PD DDI Database • Drive ID: \`1eg07NXxWYgJq0NxLf0Vim1JlV7KTu16S\`)
-• **[2] DiPiro’s Pharmacotherapy (13th Ed)** — Complete Organ-System Chapters
-• **[3] ACCP/ASHP Cardiology Pharmacy (BCCP 2026)** — All 6 Specialty Chapters
-• **[4] ACCP Updates in Therapeutics® 2026 (Vol. 1 & Vol. 2)** — All 22 BCPS Chapters
+كل إجابة يجب أن تميّز بين سجل المعرفة والمصدر المرجعي، وتعرض ما هو متاح فعلاً من بيانات الفصل/الصفحة. إذا غاب المصدر أو مستوى الدليل أو تعذرت المطابقة، صرّح بأنه غير متاح ولا تنسب نصًا حرفيًا أو مراجعة سريرية غير مثبتة.`
+          : `Welcome to **ClinPharm Clinical Reference Assistant**. The in-app collection contains **${allBooks.length} reference records (${totalChaptersCount} chapter/table records)**. Some entries may be embedded summaries or extracted text; do not assume verbatim fidelity, clinical review, or endorsement unless the source metadata establishes it:
+• **[1] Stockley’s Drug Interactions** (drug-interaction reference record)
+• **[2] DiPiro’s Pharmacotherapy (13th Ed)**
+• **[3] ACCP/ASHP Cardiology Pharmacy (BCCP 2026)**
+• **[4] ACCP Updates in Therapeutics® 2026 (Vol. 1 & Vol. 2)**
 • **[5] Pharmacotherapy Casebook & Bedside PPCP Guide** — Schwinghammer e-Casebook Standard
 • **[6] Hospital Clinical Dosing Compendium & ICU Stewardship**
 
-Ask any clinical pharmacotherapy, renal/hepatic dosing, or Stockley’s DDI question. Every claim cites its numbered source \`[1]\`, \`[2]\` with expandable verbatim textbook passages below each answer.`,
+For clinical questions, distinguish knowledge-graph records from reference sources. Cite only source/chapter/page fields that are present; disclose missing source metadata or evidence level. Do not invent quotations, page references, clinical review, or guideline endorsement. This assistant is not a substitute for professional judgment.`,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       citations: PRIMARY_CLINICAL_REFERENCES.map(r => ({
         title: lang === 'ar' ? r.badgeAr : r.badge,
-        evidenceLevel: 'Verified Source',
+        evidenceLevel: 'Unavailable',
         url: r.viewUrl
       }))
     }
@@ -253,7 +252,7 @@ Ask any clinical pharmacotherapy, renal/hepatic dosing, or Stockley’s DDI ques
         }
       }
 
-      // 3. Offline Verbatim NotebookLM Reference Extractor (100% query-specific, strictly quotes matched [1]..[4] sources & tables)
+      // 3. Offline local reference synthesis when no remote response is available.
       if (!replyText) {
         replyText = synthesizeGroundedNotebookAnswer(
           currentInput,
@@ -261,14 +260,14 @@ Ask any clinical pharmacotherapy, renal/hepatic dosing, or Stockley’s DDI ques
           currentPatient,
           groundingBundle
         );
-        usedModelBadge = `NotebookLM Verbatim Extractor • ${groundingBundle.numberedSources.length} Sources Cited`;
+        usedModelBadge = `Local reference synthesis • ${groundingBundle.numberedSources.length} sources`;
       }
 
       setLiveAiStatus('connected');
 
       const sourceCitations = groundingBundle.numberedSources.map(src => ({
         title: `[${src.sourceIndex}] ${lang === 'ar' ? src.bookBadgeAr : src.bookBadge}: Ch.${src.chapterNumber} (${src.sectionNumber})`,
-        evidenceLevel: src.pageRange,
+        evidenceLevel: 'Unavailable',
         url: src.sourceUrl
       }));
 
@@ -298,7 +297,7 @@ Ask any clinical pharmacotherapy, renal/hepatic dosing, or Stockley’s DDI ques
           id: `a-${Date.now()}`,
           sender: 'assistant',
           text: fallbackText,
-          modelBadge: `NotebookLM Verbatim Extractor • ${emergencyBundle.numberedSources.length} Sources`,
+          modelBadge: `Local reference synthesis • ${emergencyBundle.numberedSources.length} sources`,
           groundedSources: emergencyBundle.numberedSources,
           matchedDdis: emergencyBundle.matchedInteractions,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -356,7 +355,7 @@ Ask any clinical pharmacotherapy, renal/hepatic dosing, or Stockley’s DDI ques
                 <p className="text-[11px] text-teal-100/70 truncate">
                   {currentPatient
                     ? `Active Patient: ${currentPatient.name} (${currentPatient.mrn} • CrCl ${currentPatient.labs.crcl} mL/min)`
-                    : `${allBooks.length} Accredited Books • ${totalChaptersCount} Verbatim Chapters Grounded`}
+                    : `${allBooks.length} reference records • ${totalChaptersCount} chapter/table records`}
                 </p>
               </div>
             </div>
@@ -519,7 +518,7 @@ Ask any clinical pharmacotherapy, renal/hepatic dosing, or Stockley’s DDI ques
                       <span className="px-2 py-0.5 rounded-md bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 border border-teal-200/60 dark:border-teal-800">
                         {lang === 'ar'
                           ? `${m.groundedSources.length} مصادر مرجعية مقتبسة`
-                          : `${m.groundedSources.length} Verified Citations`}
+                          : `${m.groundedSources.length} references cited`}
                       </span>
                     )}
                   </div>
@@ -527,15 +526,15 @@ Ask any clinical pharmacotherapy, renal/hepatic dosing, or Stockley’s DDI ques
 
                 <div className="leading-relaxed">{m.text}</div>
 
-                {/* NotebookLM Expandable Verbatim Source Cards */}
+                {/* Expandable reference-source cards */}
                 {m.groundedSources && m.groundedSources.length > 0 && (
                   <div className="pt-2.5 border-t border-slate-200 dark:border-slate-800 space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 flex items-center gap-1">
                         <FileText className="w-3 h-3 text-teal-600" />
                         {lang === 'ar'
-                          ? 'المصادر المرجعية المرقّمة (انقر لعرض الفقرة الحرفية الأصلية أو فتح الفصل):'
-                          : 'Numbered Reference Passages (Click to inspect verbatim textbook quote):'}
+                          ? 'المصادر المرجعية المرقّمة (انقر لعرض المقطع المتاح أو فتح سجل الفصل):'
+                          : 'Numbered reference sources (open to inspect the available passage or chapter record):'}
                       </span>
                     </div>
 
@@ -654,8 +653,8 @@ Ask any clinical pharmacotherapy, renal/hepatic dosing, or Stockley’s DDI ques
               <Sparkles className="w-4 h-4 text-teal-500 animate-spin" />
               <span>
                 {lang === 'ar'
-                  ? `جاري البحث المرجعي الدقيق في الـ ${allBooks.length} كتب (${totalChaptersCount} فصلاً + Stockley’s DDI) وتوثيق الإجابة بالترقيم [1]، [2]...`
-                  : `Searching ${allBooks.length} accredited books (${totalChaptersCount} chapters + Stockley's DDI) for source-grounded synthesis...`}
+                  ? `جاري البحث في سجلات المراجع المتاحة (${allBooks.length} سجلًا، ${totalChaptersCount} فصلًا/جدولًا) ومطابقة ما يتوفر من بيانات المصدر...`
+                  : `Searching available reference records (${allBooks.length} records, ${totalChaptersCount} chapters/tables) and matching available source details...`}
               </span>
             </div>
           )}

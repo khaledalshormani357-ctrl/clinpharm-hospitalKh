@@ -63,9 +63,9 @@ export const HEART_FAILURE_CLINICAL_TOPIC: ClinicalTopic = {
   specialty: 'Cardiology',
   specialtyAr: 'أمراض القلب والشرايين',
   descriptionEn:
-    'Complex clinical syndrome resulting from structural or functional impairment of ventricular filling or ejection of blood, encompassing HFrEF (LVEF <= 40%), HFmrEF (LVEF 41–49%), HFpEF (LVEF >= 50%), and Acute Decompensated Heart Failure (ADHF / Nohria-Stevenson Subsets I–IV). Synthesized strictly from DiPiro 13th Ed, ACCP/ASHP Cardiology (BCCP) 2026, ACCP Vol 2, Stockley’s Drug Interactions, and Pharmacotherapy Casebook 13th Ed.',
+    'Complex clinical syndrome resulting from structural or functional impairment of ventricular filling or ejection of blood, encompassing HFrEF (LVEF <= 40%), HFmrEF (LVEF 41–49%), HFpEF (LVEF >= 50%), and Acute Decompensated Heart Failure (ADHF / Nohria-Stevenson Subsets I–IV). Contributing source records listed for this topic: DiPiro 13th Ed, ACCP/ASHP Cardiology (BCCP) 2026, ACCP Vol 2, Stockley’s Drug Interactions, and Pharmacotherapy Casebook 13th Ed.',
   descriptionAr:
-    'متلازمة سريرية معقدة تنجم عن خلل بنيوي أو وظيفي في امتلاء البطين أو قذف الدم، وتشمل قصور القلب بانخفاض الكسر القذفي (HFrEF؛ LVEF <= 40%)، ومتوسط الكسر القذفي (HFmrEF؛ 41–49%)، ومحفوظ الكسر القذفي (HFpEF؛ >= 50%)، والهبوط القلبي الحاد غير المعاوض (ADHF). مستخلصة حصرياً من المراجع المعتمدة في المكتبة.',
+    'متلازمة سريرية معقدة تنجم عن خلل بنيوي أو وظيفي في امتلاء البطين أو قذف الدم، وتشمل قصور القلب بانخفاض الكسر القذفي (HFrEF؛ LVEF <= 40%)، ومتوسط الكسر القذفي (HFmrEF؛ 41–49%)، ومحفوظ الكسر القذفي (HFpEF؛ >= 50%)، والهبوط القلبي الحاد غير المعاوض (ADHF). تسجل بيانات هذا الموضوع المصادر التالية كمراجع مساهمة: DiPiro 13th Ed وACCP/ASHP Cardiology 2026 وACCP Vol 2 وStockley’s Drug Interactions وPharmacotherapy Casebook 13th Ed.',
   clinicalUrgency: 'high_alert',
   prototypeScope: 'full_monograph',
   status: 'conflicting_evidence',
@@ -259,8 +259,8 @@ export const HEART_FAILURE_CLINICAL_TOPIC: ClinicalTopic = {
       topicId: 'topic-heart-failure',
       sectionKey: 'clinical_guidelines',
       sectionOrder: 17,
-      titleEn: '17. AHA/ACC/HFSA Clinical Guidelines & Landmark Clinical Trials',
-      titleAr: '17. التوصيات والإرشادات السريرية المعتمدة (AHA/ACC/HFSA) والتجارب المرجعية',
+      titleEn: '17. AHA/ACC/HFSA Guideline References & Landmark Clinical Trials',
+      titleAr: '17. مراجع الإرشادات السريرية والتجارب المرجعية (AHA/ACC/HFSA)',
       availabilityStatus: 'populated',
       populatedStatementCount: 2,
       sourceIds: ['dipiro-13th-ed', 'accp-cardiology-2026']
@@ -270,7 +270,7 @@ export const HEART_FAILURE_CLINICAL_TOPIC: ClinicalTopic = {
       topicId: 'topic-heart-failure',
       sectionKey: 'references_evidence',
       sectionOrder: 18,
-      titleEn: '18. Contributing References & Verbatim Evidence Index',
+      titleEn: '18. Contributing References & Source Metadata',
       titleAr: '18. المراجع والمصادر العلمية الداعمة',
       availabilityStatus: 'populated',
       populatedStatementCount: 1,
@@ -287,8 +287,8 @@ export const HEART_FAILURE_CLINICAL_TOPIC: ClinicalTopic = {
       topicId: 'topic-heart-failure',
       sectionKey: 'related_topics',
       sectionOrder: 19,
-      titleEn: '19. Semantically Linked Clinical Topics (13 Connected Graph Nodes)',
-      titleAr: '19. المواضيع السريرية والدوائية المرتبطة (13 عقدة معرفية موثقة)',
+      titleEn: '19. Semantically Linked Clinical Topics (13 Relationships)',
+      titleAr: '19. المواضيع السريرية والدوائية المرتبطة (13 علاقة)',
       availabilityStatus: 'populated',
       populatedStatementCount: 1,
       sourceIds: [

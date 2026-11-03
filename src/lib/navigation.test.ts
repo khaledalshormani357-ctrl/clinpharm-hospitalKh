@@ -10,8 +10,9 @@ import {
 const labels = Object.fromEntries(APP_TABS.map(tab => [tab, `Demo ${tab}`])) as Record<(typeof APP_TABS)[number], string>;
 
 describe('hash navigation map', () => {
-  it('maps each existing tab to a stable deep-link and back', () => {
-    expect(APP_TABS).toHaveLength(8);
+  it('maps each available tab, including the encyclopedia, to a stable deep-link and back', () => {
+    expect(APP_TABS).toHaveLength(9);
+    expect(APP_TABS).toContain('encyclopedia');
     for (const tab of APP_TABS) {
       const hash = hashForTab(tab);
       expect(hash).toBe(`#${TAB_ROUTES[tab]}`);
@@ -22,6 +23,7 @@ describe('hash navigation map', () => {
   it('accepts a trailing slash and ignores route query fragments', () => {
     expect(tabFromHash('#/patients/')).toBe('patients');
     expect(tabFromHash('#/training?view=cases')).toBe('training');
+    expect(tabFromHash('#/encyclopedia/dka/section/clinical_presentation')).toBe('encyclopedia');
   });
 
   it('preserves the existing admin destination without introducing a new navigation-level role gate', () => {

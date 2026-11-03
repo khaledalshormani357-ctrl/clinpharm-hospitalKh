@@ -19,6 +19,7 @@ interface Props {
 
 export function MobileBottomNavigation({ activeTab, lang, labels, onNavigate, onOpenDrawer }: Props) {
   const safetyActive = activeTab === 'alerts' || activeTab === 'interventions';
+  const moreActive = ['reconciliation', 'training', 'users_admin', 'encyclopedia'].includes(activeTab);
   const items: Array<{ tab: AppTab; label: string; icon: LucideIcon; active: boolean; onClick: () => void }> = [
     { tab: 'patients', label: labels.patients, icon: Users, active: activeTab === 'patients', onClick: () => onNavigate('patients') },
     { tab: 'guidelines', label: labels.guidelines, icon: BookOpen, active: activeTab === 'guidelines', onClick: () => onNavigate('guidelines') },
@@ -50,10 +51,11 @@ export function MobileBottomNavigation({ activeTab, lang, labels, onNavigate, on
           type="button"
           onClick={onOpenDrawer}
           aria-haspopup="dialog"
+          aria-current={moreActive ? 'page' : undefined}
           aria-label={labels.more}
-          className="flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-clinical text-[10px] font-medium leading-tight text-clinical-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-clinical-focus"
+          className={`flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-clinical text-[10px] leading-tight focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-clinical-focus ${moreActive ? 'font-bold text-clinical-teal' : 'font-medium text-clinical-muted'}`}
         >
-          <span className="flex size-8 items-center justify-center rounded-full">
+          <span className={`flex size-8 items-center justify-center rounded-full ${moreActive ? 'bg-clinical-info-soft' : ''}`}>
             <Ellipsis aria-hidden="true" className="size-5" />
           </span>
           <span className="max-w-full truncate">{labels.more}</span>

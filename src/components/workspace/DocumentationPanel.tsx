@@ -191,7 +191,7 @@ export function DocumentationPanel({
                 `# Clinical Pharmacist SOAP Interventions Log`,
                 ...filteredList.map(
                   (it, i) =>
-                    `## ${i + 1}. ${it.patientName} (${it.mrn}) — ${it.medicationInvolved}\n- **DRP:** ${it.drpType} (${it.severity.toUpperCase()})\n- **Issue (S/O):** ${it.clinicalIssue}\n- **Rationale (A):** ${it.rationale}\n- **Plan (P):** ${it.proposedRecommendation}\n- **Reference:** ${it.referenceTitle || 'Verified Local Reference'}`
+                    `## ${i + 1}. ${it.patientName} (${it.mrn}) — ${it.medicationInvolved}\n- **DRP:** ${it.drpType} (${it.severity.toUpperCase()})\n- **Issue (S/O):** ${it.clinicalIssue}\n- **Rationale (A):** ${it.rationale}\n- **Plan (P):** ${it.proposedRecommendation}\n- **Reference:** ${it.referenceTitle || 'Local reference (metadata unavailable)'}`
                 )
               ].join('\n\n');
               printOrSaveClinicalPdf({
