@@ -1,7 +1,9 @@
 import React, { useState } from "react";
-import { FileText, Plus, CheckCircle2, Clock, Filter, X, Wand2, BookOpen, Database, Printer, Share2 } from "lucide-react";
+import { Filter, X, Wand2 } from "lucide-react";
 import { ClinicalIntervention, InterventionStatus, Patient, DRPType, Language } from "../../types/clinical";
 import { ACCP_2026_CHAPTERS } from "../../lib/clinicalReferences";
+import { InterventionWorkspaceHeader } from "./InterventionWorkspaceHeader";
+import { InterventionCard } from "./InterventionCard";
 import { printOrSaveClinicalPdf, shareClinicalFile } from "../../lib/androidPermissions";
 
 interface DocumentationPanelProps {
@@ -165,81 +167,18 @@ export function DocumentationPanel({
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      <div className="bg-white dark:bg-slate-900 p-4 sm:p-6 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-start gap-3">
-          <div className="bg-indigo-50 dark:bg-indigo-950/50 p-2.5 rounded-xl text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/50 shrink-0">
-            <FileText className="h-5 w-5 sm:h-6 sm:w-6" />
-          </div>
-          <div>
-            <h2 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white">
-              {lang === 'ar'
-                ? 'توثيق التدخلات السريرية وملاحظات SOAP (Clinical Interventions & DRP Log)'
-                : 'Clinical Pharmacist Interventions & SOAP Note Documentation'}
-            </h2>
-            <p className="text-slate-500 dark:text-slate-400 text-xs sm:text-sm mt-0.5 leading-relaxed">
-              {lang === 'ar'
-                ? 'سجل رسمي لـ Drug-Related Problems (DRPs)، التوصيات الدوائية بصيغة SOAP، والأثر المالي التقديري (Cost Avoidance).'
-                : 'Structured documentation of Drug-Related Problems (DRPs), SOAP clinical recommendations, and cost avoidance.'}
-            </p>
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-2 shrink-0">
-          <button
-            type="button"
-            onClick={() => {
-              const md = [
-                `# Clinical Pharmacist SOAP Interventions Log`,
-                ...filteredList.map(
-                  (it, i) =>
-                    `## ${i + 1}. ${it.patientName} (${it.mrn}) — ${it.medicationInvolved}\n- **DRP:** ${it.drpType} (${it.severity.toUpperCase()})\n- **Issue (S/O):** ${it.clinicalIssue}\n- **Rationale (A):** ${it.rationale}\n- **Plan (P):** ${it.proposedRecommendation}\n- **Reference:** ${it.referenceTitle || 'Local reference (metadata unavailable)'}`
-                )
-              ].join('\n\n');
-              printOrSaveClinicalPdf({
-                title:
-                  lang === 'ar'
-                    ? 'سجل التدخلات السريرية وملاحظات SOAP — ClinPharm Hospital'
-                    : 'Clinical Pharmacist SOAP Interventions Log',
-                subtitle: `Total Documented Interventions: ${filteredList.length}`,
-                bodyMarkdownOrText: md,
-                filenameBase: 'ClinPharm-SOAP-Interventions-Log',
-                dir: lang === 'ar' ? 'rtl' : 'ltr'
-              });
-            }}
-            className="flex items-center justify-center gap-1.5 bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 px-3.5 py-2.5 min-h-[44px] rounded-xl text-xs font-bold hover:bg-slate-200 transition-colors cursor-pointer"
-          >
-            <Printer className="h-4 w-4 text-indigo-600" />
-            <span>{lang === 'ar' ? 'طباعة / PDF' : 'Print / PDF'}</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              const md = [
-                `# Clinical Pharmacist SOAP Interventions Log`,
-                ...filteredList.map(
-                  (it, i) =>
-                    `## ${i + 1}. ${it.patientName} (${it.mrn}) — ${it.medicationInvolved}\n- **DRP:** ${it.drpType} (${it.severity.toUpperCase()})\n- **Issue (S/O):** ${it.clinicalIssue}\n- **Rationale (A):** ${it.rationale}\n- **Plan (P):** ${it.proposedRecommendation}`
-                )
-              ].join('\n\n');
-              void shareClinicalFile({
-                filename: 'ClinPharm-SOAP-Interventions-Log.md',
-                title: 'ClinPharm Hospital — SOAP Interventions Log',
-                content: md
-              });
-            }}
-            className="flex items-center justify-center gap-1.5 bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 px-3.5 py-2.5 min-h-[44px] rounded-xl text-xs font-bold hover:bg-slate-200 transition-colors cursor-pointer"
-          >
-            <Share2 className="h-4 w-4 text-emerald-600" />
-            <span>{lang === 'ar' ? 'مشاركة' : 'Share'}</span>
-          </button>
-          <button 
-            onClick={() => setIsModalOpen(true)}
-            className="flex items-center justify-center gap-2 bg-slate-900 dark:bg-teal-600 text-white px-4 py-2.5 min-h-[44px] rounded-xl text-xs sm:text-sm font-bold hover:bg-slate-800 dark:hover:bg-teal-500 transition-colors shadow-xs cursor-pointer shrink-0"
-          >
-            <Plus className="h-4 w-4" />
-            {lang === 'ar' ? '+ توثيق SOAP / DRP جديد' : '+ New SOAP Intervention'}
-          </button>
-        </div>
-      </div>
+      <InterventionWorkspaceHeader
+        lang={lang}
+        interventions={interventions}
+        onNew={() => setIsModalOpen(true)}
+        onShare={() => {
+          const md = [
+            `# Clinical Pharmacist SOAP Interventions Log`,
+            ...filteredList.map((it, i) => `## ${i + 1}. ${it.patientName} (${it.mrn}) — ${it.medicationInvolved}\n- **DRP:** ${it.drpType} (${it.severity.toUpperCase()})\n- **Issue (S/O):** ${it.clinicalIssue}\n- **Rationale (A):** ${it.rationale}\n- **Plan (P):** ${it.proposedRecommendation}`)
+          ].join('\n\n');
+          void shareClinicalFile({ filename: 'ClinPharm-SOAP-Interventions-Log.md', title: 'ClinPharm Hospital — SOAP Interventions Log', content: md });
+        }}
+      />
 
       {/* Android Bottom-Sheet Modal for SOAP Note Creation */}
       {isModalOpen && (
@@ -416,123 +355,28 @@ export function DocumentationPanel({
         </div>
       )}
 
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs overflow-hidden">
-        <div className="p-3 sm:p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-800/30">
-          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
-            <Filter className="h-4 w-4 text-slate-400 shrink-0" />
-            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider shrink-0">Filter:</span>
-            <button onClick={() => setFilterStatus("all")} className={`px-3 py-1.5 min-h-[34px] rounded-lg text-xs font-bold cursor-pointer shrink-0 ${filterStatus === "all" ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900" : "text-slate-600 dark:text-slate-400"}`}>
-              {lang === 'ar' ? 'الكل (All)' : 'All'} ({interventions.length})
-            </button>
-            <button onClick={() => setFilterStatus("accepted")} className={`px-3 py-1.5 min-h-[34px] rounded-lg text-xs font-bold cursor-pointer shrink-0 ${filterStatus === "accepted" ? "bg-emerald-600 text-white" : "text-slate-600 dark:text-slate-400"}`}>
-              {lang === 'ar' ? 'مقبول (Accepted)' : 'Accepted'} ({interventions.filter(i => i.status === "accepted").length})
-            </button>
-            <button onClick={() => setFilterStatus("pending")} className={`px-3 py-1.5 min-h-[34px] rounded-lg text-xs font-bold cursor-pointer shrink-0 ${filterStatus === "pending" ? "bg-amber-500 text-white" : "text-slate-600 dark:text-slate-400"}`}>
-              {lang === 'ar' ? 'قيد المراجعة (Pending)' : 'Pending'} ({interventions.filter(i => i.status === "pending").length})
-            </button>
+      <div className="space-y-3">
+        <div className="flex items-center gap-2 overflow-x-auto rounded-clinical border border-clinical-border bg-clinical-surface p-2">
+          <Filter aria-hidden="true" className="size-4 shrink-0 text-clinical-muted" />
+          {(['all', 'pending', 'accepted', 'modified', 'rejected'] as const).map(status => {
+            const count = status === 'all' ? interventions.length : interventions.filter(item => item.status === status).length;
+            const active = filterStatus === status;
+            return <button key={status} type="button" onClick={() => setFilterStatus(status)} className={`min-h-9 shrink-0 rounded-clinical px-3 text-xs font-semibold ${active ? 'bg-clinical-navy text-white' : 'text-clinical-muted hover:bg-clinical-surface-subtle'}`}>{status === 'all' ? (lang === 'ar' ? 'الكل' : 'All') : status} ({count})</button>;
+          })}
+        </div>
+        {filteredList.length === 0 ? (
+          <div className="rounded-clinical border border-dashed border-clinical-border bg-clinical-surface p-10 text-center text-sm text-clinical-muted">
+            {lang === 'ar' ? 'لا توجد تدخلات في هذا العرض.' : 'No interventions in this view.'}
           </div>
-        </div>
-
-        <div className="divide-y divide-slate-100 dark:divide-slate-800">
-          {filteredList.map((item) => (
-            <div key={item.id} className="p-4 sm:p-6 hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-colors">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-                <div>
-                  <div className="flex flex-wrap items-center gap-2 mb-1">
-                    <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                      {item.patientName} ({item.mrn})
-                    </span>
-                    <span className="text-xs font-mono text-teal-600 dark:text-teal-400 font-bold" dir="ltr">
-                      • {item.ward} • {item.date}
-                    </span>
-                  </div>
-                  <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white">
-                    {getDrpLabel(item.drpType)} — <span dir="ltr" className="text-teal-700 dark:text-teal-300">{item.medicationInvolved}</span>
-                  </h3>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className={`px-2.5 py-1 rounded-md text-xs font-bold uppercase ${
-                    item.severity === "high" 
-                      ? "bg-rose-50 text-rose-700 dark:bg-rose-950/50 dark:text-rose-400 border border-rose-200 dark:border-rose-800/50" 
-                      : item.severity === "medium"
-                      ? "bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-400 border border-amber-200 dark:border-amber-800/50"
-                      : "bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-400 border border-blue-200 dark:border-blue-800/50"
-                  }`} dir="ltr">
-                    {item.severity} severity
-                  </span>
-                  <span className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${
-                    item.status === "accepted"
-                      ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400"
-                      : "bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-400"
-                  }`}>
-                    {item.status === "accepted" ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Clock className="h-3.5 w-3.5" />}
-                    {item.status === "accepted"
-                      ? (lang === 'ar' ? 'تم القبول (Accepted)' : 'Accepted')
-                      : (lang === 'ar' ? 'قيد المراجعة (Pending)' : 'Pending')}
-                  </span>
-                  {item.status === "pending" && (
-                    <button
-                      onClick={() => onUpdateStatus(item.id, "accepted", "تم اعتماد التوصية السريرية وتعديل الأمر الدوائي (Accepted by Attending).")}
-                      className="text-xs font-bold px-3 py-1.5 min-h-[36px] rounded-xl bg-emerald-600 text-white hover:bg-emerald-500 transition-colors cursor-pointer"
-                    >
-                      {lang === 'ar' ? 'اعتماد الطبيب (Accept)' : 'Mark Accepted'}
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-slate-50 dark:bg-slate-800/40 p-3.5 sm:p-4 rounded-xl border border-slate-200/60 dark:border-slate-700/50 text-xs sm:text-sm">
-                <div className="md:col-span-2">
-                  <span className="font-bold text-teal-600 dark:text-teal-400 uppercase text-[11px] tracking-wider block mb-1">
-                    {lang === 'ar' ? 'المشكلة السريرية والمعطيات (S/O — Clinical Issue)' : 'S/O — Clinical Issue'}
-                  </span>
-                  <p className="text-slate-700 dark:text-slate-300 leading-relaxed">{item.clinicalIssue}</p>
-                </div>
-                <div className="md:col-span-2 pt-2 border-t border-slate-200/60 dark:border-slate-700/50">
-                  <span className="font-bold text-amber-600 dark:text-amber-400 uppercase text-[11px] tracking-wider block mb-1">
-                    {lang === 'ar' ? 'التقييم والدليل المرجعي (A — Assessment & Rationale)' : 'A — Clinical Rationale'}
-                  </span>
-                  <p className="text-slate-700 dark:text-slate-300 leading-relaxed">{item.rationale}</p>
-                </div>
-                <div className="md:col-span-2 pt-2 border-t border-slate-200/60 dark:border-slate-700/50">
-                  <span className="font-bold text-indigo-600 dark:text-indigo-400 uppercase text-[11px] tracking-wider block mb-1">
-                    {lang === 'ar' ? 'التوصية والخطة العلاجية (P — Proposed Plan)' : 'P — Proposed Pharmacotherapy Plan'}
-                  </span>
-                  <p className="text-slate-900 dark:text-white font-semibold whitespace-pre-line leading-relaxed">{item.proposedRecommendation}</p>
-                </div>
-              </div>
-
-              {(item.referenceTitle || item.physicianFeedback) && (
-                <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
-                  {item.referenceTitle && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (item.referenceSourceUrl && onOpenLocalReference) {
-                          onOpenLocalReference(item.referenceSourceUrl);
-                        }
-                      }}
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-teal-50 dark:bg-teal-950/50 hover:bg-teal-100 dark:hover:bg-teal-900/60 border border-teal-200 dark:border-teal-800/60 font-mono text-teal-800 dark:text-teal-300 font-semibold transition cursor-pointer"
-                      dir="ltr"
-                      title={lang === 'ar' ? 'فتح الفصل المرجعي من قاعدة البيانات المحلية' : 'Open chapter in local reference database'}
-                    >
-                      <Database className="w-3.5 h-3.5 text-teal-600 shrink-0" />
-                      <span>{item.referenceTitle}</span>
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-teal-600 text-white font-sans font-bold">
-                        {lang === 'ar' ? 'فتح محلياً' : 'Local DB'}
-                      </span>
-                    </button>
-                  )}
-                  {item.physicianFeedback && (
-                    <span className="text-emerald-700 dark:text-emerald-400 font-medium">
-                      ✓ {item.physicianFeedback}
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
+        ) : filteredList.map(item => (
+          <InterventionCard
+            key={item.id}
+            item={item}
+            lang={lang}
+            onAccept={acceptedItem => onUpdateStatus(acceptedItem.id, 'accepted', lang === 'ar' ? 'تم اعتماد التوصية السريرية وتعديل الأمر الدوائي.' : 'Clinical recommendation accepted and medication order updated.')}
+            onOpenReference={onOpenLocalReference}
+          />
+        ))}
       </div>
     </div>
   );
