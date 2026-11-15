@@ -8,17 +8,14 @@ import {
   ShieldAlert,
   ClipboardList,
   BookOpen,
-  GraduationCap,
   Sparkles,
   Search,
-  Plus,
   Moon,
   Sun,
   Globe,
   Stethoscope,
   Activity,
   AlertTriangle,
-  Building2,
   Database,
   GitBranch,
   Table,
@@ -37,6 +34,7 @@ import { DocumentationPanel } from './workspace/DocumentationPanel';
 import { GuidelinesPanel } from './workspace/GuidelinesPanel';
 import { TrainingPanel } from './workspace/TrainingPanel';
 import { UsersAdminPanel } from './workspace/UsersAdminPanel';
+import { PatientWorkspaceHeader } from './workspace/PatientWorkspaceHeader';
 import { CopilotDialog } from './CopilotDialog';
 import { PatientDetailsModal } from './PatientDetailsModal';
 import { NewPatientModal } from './NewPatientModal';
@@ -59,6 +57,7 @@ import { MobileBottomNavigation } from './navigation/MobileBottomNavigation';
 import { MobileNavigationDrawer } from './navigation/MobileNavigationDrawer';
 import { PrimarySidebar } from './navigation/PrimarySidebar';
 import { ClinicalEncyclopediaPage } from './clinical-encyclopedia/ClinicalEncyclopediaPage';
+import { ClinicalEmptyState } from './ui/clinical';
 
 interface Props {
   patients: Patient[];
@@ -353,43 +352,12 @@ export function DashboardLayout({
         {/* TAB 1: Patients & Inpatient Rounds */}
         {activeTab === 'patients' && (
           <div className="space-y-4 sm:space-y-6">
-            {/* Top Toolbar */}
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-              <div>
-                <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                  <Building2 className="w-5 h-5 text-teal-600 shrink-0" />
-                  <span>
-                    {lang === 'ar'
-                      ? 'جولة الصيدلة الإكلينيكية بالأجنحة (Inpatient Clinical Rounds)'
-                      : 'Inpatient Clinical Pharmacy Rounds'}
-                  </span>
-                </h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  {lang === 'ar'
-                    ? 'متابعة يومية لـ CrCl / eGFR، أهداف TDM (AUC24/MIC)، وملفات MAR لجميع المنومين في الـ ICU والـ CCU والأجنحة.'
-                    : 'Daily monitoring of CrCl / eGFR, TDM targets (AUC24/MIC), and MAR charts across ICU, CCU, and inpatient wards.'}
-                </p>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-                <button
-                  onClick={() => setActiveTab('training')}
-                  className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 min-h-[44px] px-3.5 py-2.5 bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 text-amber-300 rounded-xl text-xs font-bold transition border border-slate-700 active:scale-95 whitespace-nowrap"
-                >
-                  <GraduationCap className="w-4 h-4 shrink-0" />
-                  <span>
-                    {lang === 'ar' ? 'دليل أخذ الحالة وحالات الاختبار' : 'Case-Taking Guide & Test Cases'}
-                  </span>
-                </button>
-                <button
-                  onClick={() => setIsNewPatientOpen(true)}
-                  className="flex-1 sm:flex-initial flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 bg-teal-600 hover:bg-teal-500 text-white rounded-xl text-xs font-bold transition shadow-md shadow-teal-600/20 active:scale-95 whitespace-nowrap"
-                >
-                  <Plus className="w-4 h-4" />
-                  {t.patient.addNewPatient}
-                </button>
-              </div>
-            </div>
+            <PatientWorkspaceHeader
+              lang={lang}
+              patients={patients}
+              onOpenTraining={() => setActiveTab('training')}
+              onAddPatient={() => setIsNewPatientOpen(true)}
+            />
 
             {/* Filter Controls: Horizontal Scrollable Ward Chips, Status Badges & Search */}
             <div className="space-y-2.5">
@@ -471,6 +439,19 @@ export function DashboardLayout({
             </div>
 
             {/* Patient Cards Grid — Ergonomic Mobile Cards on Android, 2-col on Desktop */}
+            {filteredPatients.length === 0 ? (
+              <ClinicalEmptyState
+                className="rounded-clinical border border-dashed border-clinical-border bg-clinical-surface"
+                icon={<Search />}
+                title={lang === 'ar' ? 'لا توجد نتائج مطابقة' : 'No matching patients'}
+                description={lang === 'ar' ? 'جرّب تغيير الجناح أو حالة المريض أو عبارة البحث.' : 'Try changing the ward, patient status, or search term.'}
+                action={
+                  <button type="button" onClick={() => { setSelectedWard('all'); setSelectedStatus('all'); setSearchQuery(''); }} className="min-h-10 rounded-clinical bg-clinical-teal px-4 text-xs font-semibold text-white hover:brightness-95">
+                    {lang === 'ar' ? 'مسح الفلاتر' : 'Clear filters'}
+                  </button>
+                }
+              />
+            ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
               {filteredPatients.map(patient => {
                 const crcl = calculateCrCl(
@@ -653,6 +634,7 @@ export function DashboardLayout({
                 );
               })}
             </div>
+            )}
           </div>
         )}
 
