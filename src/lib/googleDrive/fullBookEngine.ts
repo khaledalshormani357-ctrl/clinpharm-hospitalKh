@@ -26,6 +26,8 @@ import {
   saveBookImportJob,
   saveSyncedFullBook
 } from './fullBookIdb';
+import { computeSha256Hex } from './sha256';
+export { computeSha256Hex } from './sha256';
 
 export interface DriveFileItem {
   id: string;
@@ -186,30 +188,6 @@ export function hasPdfSignature(bytes: ArrayBuffer): boolean {
     }
   }
   return false;
-}
-
-export async function computeSha256Hex(buffer: ArrayBuffer): Promise<string> {
-  if (typeof crypto !== 'undefined' && crypto.subtle?.digest) {
-    const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-  }
-  // Deterministic fallback hash if crypto.subtle is unavailable
-  const bytes = new Uint8Array(buffer);
-  let h1 = 0xdeadbeef ^ bytes.length;
-  let h2 = 0x41c6ce57 ^ bytes.length;
-  for (let i = 0; i < bytes.length; i++) {
-    const ch = bytes[i];
-    h1 = Math.imul(h1 ^ ch, 2654435761);
-    h2 = Math.imul(h2 ^ ch, 1597334677);
-  }
-  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
-  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
-  return (
-    (h1 >>> 0).toString(16).padStart(8, '0') +
-    (h2 >>> 0).toString(16).padStart(8, '0') +
-    bytes.byteLength.toString(16).padStart(16, '0')
-  ).padEnd(64, '0');
 }
 
 export function computeContentHash(text: string): string {
@@ -1941,7 +1919,7 @@ export async function syncAllServerPreindexedBooks(
             currentPage: rec.totalPages,
             totalPages: rec.totalPages,
             processingStatus: rec.processingStatus,
-            message: `Verified complete! Loaded "${rec.sourceFileName}" (${rec.totalPages} pages).`
+            message: `All pages processed in the indexed record for "${rec.sourceFileName}" (${rec.totalPages} pages).`
           });
         }
         // Yield to event loop so Android WebView GC frees decompression buffers between books
@@ -2068,7 +2046,7 @@ export async function ingestDriveFileAsFullBook(options: {
         currentPage: preindexed.processedPageCount || preindexed.totalPages,
         totalPages: preindexed.totalPages,
         processingStatus: preindexed.processingStatus,
-        message: `Verified complete! Imported "${preindexed.sourceFileName || preindexed.fileName}" (${preindexed.totalPages} pages).`
+        message: `Loaded indexed reference record "${preindexed.sourceFileName || preindexed.fileName}" (${preindexed.totalPages} pages).`
       });
       return preindexed;
     }
@@ -2117,7 +2095,7 @@ export async function ingestDriveFileAsFullBook(options: {
         processingStatus: savedRecord.processingStatus,
         message:
           savedRecord.processingStatus === 'verified_complete'
-            ? `Verified complete! Imported "${sourceFileName}" (${savedRecord.totalPages} pages).`
+            ? `All pages processed for "${sourceFileName}" (${savedRecord.totalPages} pages).`
             : `Imported "${sourceFileName}" with status: ${savedRecord.processingStatus} (${savedRecord.extractedTextPageCount} text pages, ${savedRecord.unprocessedPageCount} pages needing OCR).`
       });
       return savedRecord;
@@ -2407,7 +2385,7 @@ export async function ingestDriveFileAsFullBook(options: {
     processingStatus: savedRecord.processingStatus,
     message:
       savedRecord.processingStatus === 'verified_complete'
-        ? `Verified complete! Indexed 100% of "${metadata.name}" (${savedRecord.totalPages} pages, ${savedRecord.totalChapters} chapters).`
+        ? `Indexed all pages of "${metadata.name}" (${savedRecord.totalPages} pages, ${savedRecord.totalChapters} chapters).`
         : `Import finished with status "${savedRecord.processingStatus}": ${savedRecord.extractedTextPageCount} native text pages, ${savedRecord.ocrPageCount} OCR pages, ${savedRecord.unprocessedPageCount} pages needing OCR.`
   });
 
@@ -2486,7 +2464,7 @@ export async function ingestLocalPdfFileAsFullBook(options: {
     processingStatus: savedRecord.processingStatus,
     message:
       savedRecord.processingStatus === 'verified_complete'
-        ? `Verified complete! Indexed 100% of "${file.name}" (${savedRecord.totalPages} pages).`
+        ? `Indexed all pages of "${file.name}" (${savedRecord.totalPages} pages).`
         : `Import finished with status "${savedRecord.processingStatus}" (${savedRecord.extractedTextPageCount} text pages, ${savedRecord.unprocessedPageCount} pages needing OCR).`
   });
 

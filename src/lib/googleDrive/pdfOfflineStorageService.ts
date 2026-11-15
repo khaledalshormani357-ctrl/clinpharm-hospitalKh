@@ -10,6 +10,7 @@ import {
   getAllSyncedPdfBlobSummaries,
   clearAllSyncedFullBooksFromIdb
 } from './fullBookIdb';
+import { computeSha256Hex } from './sha256';
 
 export interface OfflineBookVaultItem {
   bookId: string;
@@ -42,7 +43,7 @@ export interface OfflineVaultDiagnostics {
   isPersistentStorageGranted: boolean;
   isOnline: boolean;
   totalBooksCached: number;
-  totalVerifiedOriginalPdfs: number;
+  totalFullyIndexedOriginalPdfRecords: number;
   totalEmbeddedSummaries: number;
   totalBinaryPdfsCached: number;
   totalPagesCached: number;
@@ -167,7 +168,7 @@ export async function getOfflineVaultDiagnostics(): Promise<OfflineVaultDiagnost
   let totalChaptersCached = 0;
   let totalVaultBytes = 0;
   let totalBinaryPdfsCached = 0;
-  let totalVerifiedOriginalPdfs = 0;
+  let totalFullyIndexedOriginalPdfRecords = 0;
   let totalEmbeddedSummaries = 0;
 
   const books: OfflineBookVaultItem[] = records.map(rec => {
@@ -187,7 +188,7 @@ export async function getOfflineVaultDiagnostics(): Promise<OfflineVaultDiagnost
       processingStatus === 'verified_complete' &&
       (sourceType === 'google_drive_pdf' || sourceType === 'local_file_pdf')
     ) {
-      totalVerifiedOriginalPdfs++;
+      totalFullyIndexedOriginalPdfRecords++;
     }
     if (sourceType === 'embedded_synthetic') {
       totalEmbeddedSummaries++;
@@ -219,11 +220,11 @@ export async function getOfflineVaultDiagnostics(): Promise<OfflineVaultDiagnost
       hasBinaryPdf,
       binaryByteSize,
       indexedTextByteSize,
-      isValidPdfSignature: blobInfo?.isValidPdfSignature ?? Boolean(rec.sha256),
+      isValidPdfSignature: blobInfo?.isValidPdfSignature ?? false,
       offlineReady:
         processingStatus === 'verified_complete' &&
         ((hasBinaryPdf && Boolean(blobInfo?.isValidPdfSignature)) ||
-          (rec.chapters.length > 0 && rec.totalCharacters > 0 && Boolean(rec.sha256)))
+          (rec.chapters.length > 0 && rec.totalCharacters > 0))
     };
   });
 
@@ -253,7 +254,7 @@ export async function getOfflineVaultDiagnostics(): Promise<OfflineVaultDiagnost
     isPersistentStorageGranted,
     isOnline,
     totalBooksCached: books.length,
-    totalVerifiedOriginalPdfs,
+    totalFullyIndexedOriginalPdfRecords,
     totalEmbeddedSummaries,
     totalBinaryPdfsCached,
     totalPagesCached,
@@ -349,7 +350,7 @@ export async function downloadOfflinePdfFromVault(bookId: string): Promise<boole
     const headerLines = [
       `# ${book.displayTitle || book.sourceFileName || book.fileName}`,
       `Source File: ${book.sourceFileName || book.fileName}`,
-      `Total Pages: ${book.totalPages} | Chapters: ${book.totalChapters} | SHA-256: ${book.sha256 || 'Verified'}`,
+      `Total Pages: ${book.totalPages} | Chapters: ${book.totalChapters} | SHA-256: ${book.sha256 || 'Unavailable'}`,
       `================================================================================\n`
     ];
     const chapterBlocks = book.chapters.slice(0, 60).map(ch => {
@@ -426,8 +427,16 @@ export async function verifyOfflineBookIntegrity(bookId: string): Promise<Integr
     (record.pages.length > 0 || extractedTextPageCount > 0 || record.chapters.length > 0) &&
     originalPageCount > 0;
   const hasBinaryPdf = Boolean(pdfBytes && pdfBytes.byteLength > 0);
-  const isValidPdfHeader = hasBinaryPdf ? verifyPdfMagicHeader(pdfBytes) : Boolean(record.sha256);
-  const binaryBytes = pdfBytes?.byteLength || record.fileSize || 0;
+  const isValidPdfHeader = hasBinaryPdf ? verifyPdfMagicHeader(pdfBytes) : false;
+  const binaryBytes = pdfBytes?.byteLength || 0;
+  let sha256MatchesBytes = false;
+  if (hasBinaryPdf && record.sha256 && pdfBytes) {
+    try {
+      sha256MatchesBytes = (await computeSha256Hex(pdfBytes)).toLowerCase() === record.sha256.toLowerCase();
+    } catch {
+      sha256MatchesBytes = false;
+    }
+  }
 
   if (sourceType === 'embedded_synthetic' || processingStatus === 'embedded_summary') {
     return {
@@ -459,7 +468,9 @@ export async function verifyOfflineBookIntegrity(bookId: string): Promise<Integr
     processedPageCount === originalPageCount &&
     originalPageCount > 0 &&
     hasVerbatimPages &&
-    (hasBinaryPdf ? isValidPdfHeader : Boolean(record.sha256));
+    hasBinaryPdf &&
+    isValidPdfHeader &&
+    sha256MatchesBytes;
 
   if (isVerifiedOriginalPdf) {
     return {
@@ -479,8 +490,8 @@ export async function verifyOfflineBookIntegrity(bookId: string): Promise<Integr
       ocrPageCount,
       unprocessedPageCount: 0,
       binaryBytes,
-      messageEn: `Status [Verified Complete]: Original PDF "${record.sourceFileName || record.fileName}" (${originalPageCount} pages, ${record.totalChapters} chapters, ${extractedTextPageCount} native text pages, ${formatStorageBytes(binaryBytes)}, SHA-256: ${(record.sha256 || '').slice(0, 12)}...) verified and ready in local IndexedDB.`,
-      messageAr: `الحالة [مكتمل التحقق ✓]: المرجع الأصلي "${record.sourceFileName || record.fileName}" (${originalPageCount} صفحة، ${record.totalChapters} فصلاً، ${extractedTextPageCount} صفحة نصية، الحجم ${formatStorageBytes(binaryBytes)}، البصمة SHA-256: ${(record.sha256 || '').slice(0, 12)}...) مفهرس وموجود بالكامل في قاعدة البيانات المحلية.`
+      messageEn: `Integrity check passed for the cached original PDF bytes: the %PDF- signature and recorded SHA-256 match (${originalPageCount} pages, ${record.totalChapters} chapters, ${extractedTextPageCount} native-text pages, ${formatStorageBytes(binaryBytes)}). This does not establish clinical review or accuracy.`,
+      messageAr: `نجح فحص بايتات PDF المخزنة: توقيع %PDF- وبصمة SHA-256 المسجلة متطابقان (${originalPageCount} صفحة، ${record.totalChapters} فصلًا، ${extractedTextPageCount} صفحة نصية، ${formatStorageBytes(binaryBytes)}). لا يثبت ذلك مراجعة المحتوى سريريًا أو دقته.`
     };
   }
 
@@ -501,8 +512,20 @@ export async function verifyOfflineBookIntegrity(bookId: string): Promise<Integr
     ocrPageCount,
     unprocessedPageCount,
     binaryBytes,
-    messageEn: `Status [${processingStatus}]: "${record.sourceFileName || record.fileName}" has ${extractedTextPageCount} extracted text pages, ${ocrPageCount} OCR pages, and ${unprocessedPageCount} unprocessed/scanned pages out of ${originalPageCount} total pages.`,
-    messageAr: `الحالة [${processingStatus === 'needs_ocr' ? 'يحتاج إلى OCR' : 'مكتمل جزئياً'}]: الملف "${record.sourceFileName || record.fileName}" يحتوي على ${extractedTextPageCount} صفحة نصية، و${ocrPageCount} صفحة OCR، و${unprocessedPageCount} صفحة غير معالجة/تحتاج إلى OCR من أصل ${originalPageCount} صفحة.`
+    messageEn: !hasBinaryPdf
+      ? `Integrity not established for "${record.sourceFileName || record.fileName}": indexed text may be available, but the original PDF bytes are not cached, so its signature and recorded SHA-256 cannot be rechecked. The stored fingerprint alone is not a byte-integrity check.`
+      : !isValidPdfHeader
+        ? `Integrity not established: cached bytes for "${record.sourceFileName || record.fileName}" do not have a valid %PDF- signature.`
+        : !sha256MatchesBytes
+          ? `Integrity not established: the recorded SHA-256 does not match the cached PDF bytes for "${record.sourceFileName || record.fileName}".`
+          : `Processing status [${processingStatus}]: "${record.sourceFileName || record.fileName}" has ${extractedTextPageCount} extracted-text pages, ${ocrPageCount} OCR pages, and ${unprocessedPageCount} unprocessed/scanned pages out of ${originalPageCount} total pages.`,
+    messageAr: !hasBinaryPdf
+      ? `تعذر إثبات سلامة "${record.sourceFileName || record.fileName}": قد يكون النص المفهرس متاحًا، لكن بايتات PDF الأصلية غير مخزنة، لذلك لا يمكن إعادة فحص التوقيع أو مطابقة SHA-256 معها. وجود البصمة وحده لا يثبت سلامة البايتات.`
+      : !isValidPdfHeader
+        ? `تعذر إثبات السلامة: بايتات "${record.sourceFileName || record.fileName}" المخزنة لا تحمل توقيع %PDF- صالحًا.`
+        : !sha256MatchesBytes
+          ? `تعذر إثبات السلامة: بصمة SHA-256 المسجلة لا تطابق بايتات PDF المخزنة للملف "${record.sourceFileName || record.fileName}".`
+          : `حالة المعالجة [${processingStatus}]: يحتوي "${record.sourceFileName || record.fileName}" على ${extractedTextPageCount} صفحة نصية، و${ocrPageCount} صفحة OCR، و${unprocessedPageCount} صفحة غير معالجة/تحتاج إلى OCR من أصل ${originalPageCount} صفحة.`
   };
 }
 

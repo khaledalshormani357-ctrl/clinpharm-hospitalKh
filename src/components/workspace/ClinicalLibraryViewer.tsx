@@ -35,7 +35,6 @@ import {
   List,
   SlidersHorizontal,
   Table,
-  ShieldCheck,
   ArrowUpRight,
   Info,
   Maximize2,
@@ -51,7 +50,8 @@ import {
   Network
 } from 'lucide-react';
 import { printOrSaveClinicalPdf, shareClinicalFile } from '../../lib/androidPermissions';
-import { ClinicalTopicEncyclopediaView } from './ClinicalTopicEncyclopediaView';
+import { resolveKnowledgeGraphUri } from '../../lib/knowledgeGraph/prototypeRepository';
+import { ClinicalEncyclopediaPage } from '../clinical-encyclopedia/ClinicalEncyclopediaPage';
 
 interface Props {
   lang: Language;
@@ -192,7 +192,7 @@ export function ClinicalLibraryViewer({
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `${activeChapter.id}-verbatim-monograph.md`;
+    link.download = `${activeChapter.id}-reference-record.md`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -213,7 +213,7 @@ export function ClinicalLibraryViewer({
   const handleShareChapter = () => {
     const text = exportChapterMarkdown(activeChapter);
     void shareClinicalFile({
-      filename: `${activeChapter.id}-verbatim-monograph.md`,
+      filename: `${activeChapter.id}-reference-record.md`,
       title: `${activeChapter.title} (${activeBook.title})`,
       summaryText: activeChapter.citation,
       content: text
@@ -224,8 +224,8 @@ export function ClinicalLibraryViewer({
     if (!onAskCopilot) return;
     const prompt =
       lang === 'ar'
-        ? `استخلص لي أهم القواعد العلاجية وجداول الجرعات وفخاخ الأدوية من النص الأصلي للفصل: ${activeChapter.title} (${activeBook.title})`
-        : `Synthesize the primary therapeutic rules, dosing tables, and high-yield pitfalls from the original verbatim text of: ${activeChapter.title} (${activeBook.title})`;
+        ? `لخّص محتوى المرجع المتاح لهذا الفصل، واذكر أي نقص في المصدر أو الجرعة أو الدليل: ${activeChapter.title} (${activeBook.title})`
+        : `Summarize the available reference record for: ${activeChapter.title} (${activeBook.title}). Disclose missing source, dose, or evidence details.`;
     onAskCopilot(prompt);
   };
 
@@ -244,7 +244,7 @@ export function ClinicalLibraryViewer({
 
   return (
     <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs">
-      {/* Top Banner: Verification of Verbatim Medical Library */}
+      {/* Reference collection banner; provenance is shown per record, not implied by this collection. */}
       <div className="bg-gradient-to-r from-teal-900 via-slate-900 to-indigo-950 text-white px-4 py-3 sm:px-6 flex flex-wrap items-center justify-between gap-3 border-b border-teal-800/40">
         <div className="flex items-center gap-3 min-w-0">
           <div className="w-9 h-9 rounded-xl bg-teal-500/20 border border-teal-400/30 flex items-center justify-center text-teal-300 shrink-0">
@@ -253,13 +253,13 @@ export function ClinicalLibraryViewer({
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <h2 className="font-extrabold text-sm sm:text-base tracking-tight truncate">
-                {lang === 'ar' ? 'المكتبة الطبية المرجعية الكاملة (جميع الفصول)' : 'Full In-App Clinical Reference Library (All Chapters)'}
+                {lang === 'ar' ? 'مجموعة المراجع السريرية داخل التطبيق' : 'In-App Clinical Reference Collection'}
               </h2>
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
-                <ShieldCheck className="w-3 h-3" />
+                <BookOpen className="w-3 h-3" />
                 {lang === 'ar'
-                  ? `${books.length} مراجع • ${allChapters.length} فصلاً كاملاً بالنص الأصلي`
-                  : `${books.length} Books • ${allChapters.length} Complete Verbatim Chapters`}
+                  ? `${books.length} مراجع • ${allChapters.length} سجل فصل؛ تُعرض طبقة المصدر عند توفرها`
+                  : `${books.length} references • ${allChapters.length} chapter records; source layer shown when available`}
               </span>
             </div>
             <p className="text-[11px] text-teal-200/80 truncate">
@@ -276,13 +276,13 @@ export function ClinicalLibraryViewer({
             type="button"
             onClick={() => setDriveSyncModalOpen(true)}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 border border-emerald-400/40 text-xs font-bold transition cursor-pointer"
-            title="Connect Google Drive & Sync 100% Full PDF Textbooks"
+            title="Import PDF references and index their available pages"
           >
             <CloudDownload className="w-3.5 h-3.5 text-emerald-300" />
             <span>
               {lang === 'ar'
-                ? 'ربط Google Drive ومزامنة الكتب الكاملة'
-                : 'Google Drive Full-Book Sync'}
+                ? 'استيراد مراجع PDF من Google Drive'
+                : 'Import PDF references'}
             </span>
           </button>
           <button
@@ -329,7 +329,7 @@ export function ClinicalLibraryViewer({
         </div>
       </div>
 
-      {/* Primary Paradigm Switcher: Topic-First Knowledge Graph vs. Verbatim Reference Books */}
+      {/* Switch between topic records and reference-book records. */}
       <div className="bg-slate-900 text-slate-200 px-4 py-2 sm:px-6 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2 flex-wrap">
           <button
@@ -344,8 +344,8 @@ export function ClinicalLibraryViewer({
             <Network className="w-3.5 h-3.5" />
             <span>
               {lang === 'ar'
-                ? 'الموسوعة السريرية الموحدة حسب الموضوع (Clinical Topics — DKA & Heart Failure)'
-                : 'Topic-First Clinical Knowledge Graph (Prototype: DKA & Heart Failure)'}
+                ? 'الموسوعة السريرية حسب الموضوع'
+                : 'Clinical topic encyclopedia'}
             </span>
           </button>
           <button
@@ -360,31 +360,32 @@ export function ClinicalLibraryViewer({
             <BookOpen className="w-3.5 h-3.5" />
             <span>
               {lang === 'ar'
-                ? `فهرس المراجع والكتب الأصلية (${books.length} مراجع • ${allChapters.length} فصلاً)`
-                : `Verbatim Reference Books (${books.length} Books • ${allChapters.length} Chapters)`}
+                ? `سجلات المراجع والكتب (${books.length} مراجع • ${allChapters.length} فصلاً)`
+                : `Reference records and books (${books.length} • ${allChapters.length} chapters)`}
             </span>
           </button>
         </div>
         <div className="text-[11px] text-teal-300/90 font-mono">
           {lang === 'ar'
-            ? 'المبدأ: الموضوع السريري أولاً • تتبع صارم للمصدر والصفحة'
-            : 'Topic-First Architecture · 100% Verbatim Source Traceability'}
+            ? 'المبدأ: كل طبقة مصدر تُعرض على حدة'
+            : 'Source layers are labeled independently'}
         </div>
       </div>
 
       {libraryEntryMode === 'clinical_topics' ? (
         <div className="flex-1 min-h-0 overflow-hidden">
-          <ClinicalTopicEncyclopediaView
+          <ClinicalEncyclopediaPage
             lang={lang}
-            onOpenVerbatimCitation={(bookId, chapterId, sectionId) => {
-              setLibraryEntryMode('verbatim_books');
-              setSelectedBookId(bookId);
-              setSelectedCategory('all');
-              setActiveChapterId(chapterId);
-              if (sectionId) {
-                setTimeout(() => {
-                  scrollToSection(sectionId);
-                }, 120);
+            onOpenReference={uri => {
+              const target = resolveKnowledgeGraphUri(uri);
+              if (target?.targetType === 'verbatim_chapter_section' && target.verbatimChapterId) {
+                setLibraryEntryMode('verbatim_books');
+                setSelectedBookId(target.verbatimBookId || 'all');
+                setSelectedCategory('all');
+                setActiveChapterId(target.verbatimChapterId);
+                if (target.verbatimSectionId) setTimeout(() => scrollToSection(target.verbatimSectionId!), 120);
+              } else {
+                onNavigateLocalRef?.(uri);
               }
             }}
           />
@@ -451,8 +452,8 @@ export function ClinicalLibraryViewer({
             onChange={e => setSearchQuery(e.target.value)}
             placeholder={
               lang === 'ar'
-                ? 'بحث سريع في النص الأصلي الكامل...'
-                : 'Fast live search across verbatim text...'
+                ? 'بحث في نصوص المراجع المتاحة...'
+                : 'Search available in-app reference text...'
             }
             className="w-full pl-9 pr-8 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-teal-500"
           />
@@ -468,7 +469,7 @@ export function ClinicalLibraryViewer({
         </div>
       </div>
 
-      {/* Main Dual-Pane Layout: Left Sidebar (TOC & Chapter Navigator) + Right (Verbatim Reader Pane) */}
+      {/* Main dual-pane layout: chapter navigation and reference reader. */}
       <div className="flex-1 flex overflow-hidden relative">
         {/* Left Sidebar: Table of Contents & Chapter Navigator */}
         <aside
@@ -638,7 +639,7 @@ export function ClinicalLibraryViewer({
           </div>
         </aside>
 
-        {/* Right Main Pane: Complete Verbatim Reader */}
+        {/* Main reference reader. */}
         <main
           ref={mainScrollRef}
           className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 space-y-8 bg-white dark:bg-slate-900 scroll-smooth"
@@ -849,8 +850,8 @@ export function ClinicalLibraryViewer({
                   <CloudDownload className="w-4 h-4 text-teal-600 shrink-0" />
                   <span>
                     {lang === 'ar'
-                      ? 'الحالة [لم يُستورد ملف PDF الأصلي]: يتم حالياً عرض الفصول المرجعية المدمجة فقط. لاستيراد ملف PDF الأصلي الكامل والتحقق من صفحاته:'
-                      : 'Status [Not Imported]: Currently viewing built-in reference chapters. To import and verify the original full PDF textbook:'}
+                      ? 'ملخص مضمّن — ليس نص المصدر الأصلي. لم يُستورد ملف PDF بعد؛ تُعرض الآن الفصول الملخصة المتاحة داخل التطبيق. لاستيراد PDF وفهرسة صفحاته:'
+                      : 'Embedded summary — not original source text. No PDF has been imported; the in-app summary chapters are shown. To import a PDF and index its pages:'}
                   </span>
                 </div>
                 <button
@@ -1022,7 +1023,7 @@ export function ClinicalLibraryViewer({
                 )}
               </div>
 
-              {/* Original Verbatim Title */}
+      {/* Title from the selected reference record. */}
               <h1 className="text-xl sm:text-2xl lg:text-3xl font-black text-slate-900 dark:text-slate-50 tracking-tight leading-snug">
                 {activeChapter.title}
               </h1>
@@ -1146,13 +1147,13 @@ export function ClinicalLibraryViewer({
               </div>
             )}
 
-            {/* Verbatim Sections: The Complete Unabridged Text */}
+              {/* Reference sections; their presence does not establish verbatim fidelity. */}
             <div className="space-y-8 pt-4">
               <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
                 <div className="flex items-center gap-2">
                   <BookOpen className="w-4 h-4 text-teal-600" />
                   <h3 className="font-black text-sm uppercase tracking-wider text-slate-500">
-                    {lang === 'ar' ? 'فصول النص الأصلي المرجعي الكامل' : 'Verbatim Reference Sections'}
+                    {lang === 'ar' ? 'أقسام المرجع' : 'Reference sections'}
                   </h3>
                 </div>
                 <span className="text-xs text-slate-400">
@@ -1213,7 +1214,7 @@ export function ClinicalLibraryViewer({
                     {sec.headingAr}
                   </div>
 
-                  {/* Verbatim Clinical Body Text or Unprocessed Scanned Page Notice */}
+                  {/* Reference text or an unprocessed scanned-page notice. */}
                   {sec.extractionStatus === 'needs_ocr' && !sec.body && !sec.ocrBody ? (
                     <div className="p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200 text-xs flex items-center justify-between gap-2">
                       <span>
@@ -1256,9 +1257,9 @@ export function ClinicalLibraryViewer({
               <div className="flex items-center gap-2">
                 <Info className="w-4 h-4 text-teal-600" />
                 <span>
-                  {lang === 'ar'
-                    ? 'النص المعروض أعلاه مأخوذ مباشرةً وحرفياً من المصادر المعتمدة دون اختصار أو ترجمة آلية.'
-                    : 'The text above is rendered verbatim from the authoritative medical source without loss or machine distortion.'}
+                    {lang === 'ar'
+                      ? 'تعرض هذه الصفحة سجلات مرجعية مدمجة وأي صفحات PDF مستوردة متاحة. راجع بيانات المصدر عند ظهورها؛ وجود النص لا يعني أنه حرفي أو مُراجع سريريًا.'
+                      : 'This view contains in-app reference records and any available imported PDF pages. Check source metadata where shown; the presence of text does not establish verbatim fidelity or clinical review.'}
                 </span>
               </div>
               <button
@@ -1298,4 +1299,3 @@ export function ClinicalLibraryViewer({
     </div>
   );
 }
-

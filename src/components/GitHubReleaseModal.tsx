@@ -309,8 +309,8 @@ npx vite preview`;
                   </div>
                   <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
                     {lang === 'ar'
-                      ? 'قراءة وفهرسة 100% من صفحات ملفات الـ PDF الطبية من Google Drive أو من جهازك مباشرة وحفظها في IndexedDB.'
-                      : 'Reads and indexes 100% of pages verbatim from your Google Drive PDFs or local device files into IndexedDB.'}
+                      ? 'استخراج النص المتاح من ملفات PDF الطبية من Google Drive أو الجهاز وحفظ سجل الصفحات في IndexedDB؛ تظل الصفحات المصورة بحاجة إلى OCR.'
+                      : 'Extracts available text from Google Drive or local medical PDFs and stores page records in IndexedDB; scanned pages may still need OCR.'}
                   </p>
                 </div>
 

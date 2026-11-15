@@ -216,7 +216,7 @@ export function PdfPageCanvasViewer({
           ? err.message
           : lang === 'ar'
           ? 'تعذر تحميل ملف الـ PDF الثنائي الخام؛ يتم عرض الصفحة المرجعية المفهرسة مباشرةً.'
-          : 'Could not fetch raw binary PDF; displaying indexed verbatim page sheet.'
+          : 'Could not fetch raw PDF bytes; displaying the indexed page-text record.'
       );
     } finally {
       setIsFetchingBinary(false);
@@ -320,7 +320,7 @@ export function PdfPageCanvasViewer({
         </div>
       </div>
 
-      {/* Canvas or High-Fidelity Verbatim Page Sheet Container */}
+      {/* PDF canvas or indexed page-text fallback. */}
       <div className="p-4 overflow-auto max-h-[75vh] flex flex-col items-center justify-start bg-slate-950/90 min-h-[420px]">
         {errorMsg && (
           <div className="mb-3 text-xs text-amber-200 bg-amber-950/60 border border-amber-800 rounded-xl p-3 max-w-xl text-center">
@@ -430,9 +430,9 @@ export function PdfPageCanvasViewer({
             )}
 
             <div className="pt-4 border-t border-slate-200 flex items-center justify-between text-[10px] font-mono text-slate-400">
-              <span>SHA-256: {(syncedRecord?.sha256 || '').slice(0, 24)}...</span>
+              <span>SHA-256: {syncedRecord?.sha256 ? `${syncedRecord.sha256.slice(0, 24)}…` : (lang === 'ar' ? 'غير متاح' : 'Unavailable')}</span>
               <span>
-                Verified Verbatim Page {currentPage} of {totalPages}
+                {lang === 'ar' ? `صفحة مفهرسة ${currentPage} من ${totalPages}` : `Indexed page ${currentPage} of ${totalPages}`}
               </span>
             </div>
           </div>
@@ -447,4 +447,3 @@ export function PdfPageCanvasViewer({
     </div>
   );
 }
-

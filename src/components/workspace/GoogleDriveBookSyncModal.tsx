@@ -75,7 +75,7 @@ export function getProcessingStatusBadgeMeta(
   switch (status) {
     case 'verified_complete':
       return {
-        label: lang === 'ar' ? 'مكتمل التحقق' : 'Verified Complete',
+        label: lang === 'ar' ? 'اكتملت معالجة الصفحات' : 'All Pages Processed',
         badgeClass:
           'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30'
       };
@@ -286,8 +286,8 @@ export function GoogleDriveBookSyncModal({
       if (record.processingStatus === 'verified_complete') {
         setSuccessMessage(
           lang === 'ar'
-            ? `[${badgeMeta.label}] تم استيراد والتحقق من ملف PDF الأصلي "${record.sourceFileName || record.fileName}" (${record.totalPages} صفحة • ${record.extractedTextPageCount} صفحة نصية • SHA-256: ${(record.sha256 || '').slice(0, 12)}...)!`
-            : `[${badgeMeta.label}] Imported and verified original PDF "${record.sourceFileName || record.fileName}" (${record.totalPages} pages • ${record.extractedTextPageCount} text pages • SHA-256: ${(record.sha256 || '').slice(0, 12)}...)!`
+            ? `[${badgeMeta.label}] فُهرست صفحات "${record.sourceFileName || record.fileName}" (${record.totalPages} صفحة • ${record.extractedTextPageCount} صفحة نصية). بصمة SHA-256 مسجلة عند الاستيراد وليست فحصًا سريريًا.`
+            : `[${badgeMeta.label}] Indexed "${record.sourceFileName || record.fileName}" (${record.totalPages} pages • ${record.extractedTextPageCount} text pages). The recorded SHA-256 is an import fingerprint, not a clinical review.`
         );
       } else {
         setErrorMessage(
@@ -370,8 +370,8 @@ export function GoogleDriveBookSyncModal({
         const totalPagesLoaded = records.reduce((s, r) => s + (r.totalPages || 0), 0);
         setSuccessMessage(
           lang === 'ar'
-            ? `تم تحميل وتفعيل ${records.length} مراجع طبية أصلية كاملة (${totalPagesLoaded.toLocaleString()} صفحة حقيقية • verified_complete) مباشرةً من خزنة الخادم!`
-            : `Loaded and verified ${records.length} complete original medical textbooks (${totalPagesLoaded.toLocaleString()} real pages • verified_complete) directly from the server vault!`
+            ? `تم تحميل ${records.length} سجلات مراجع مفهرسة بالكامل (${totalPagesLoaded.toLocaleString()} صفحة إجمالًا) من خزنة الخادم. هذه الحالة تصف الفهرسة ولا تعني إعادة فحص بايتات PDF.`
+            : `Loaded ${records.length} fully indexed reference records (${totalPagesLoaded.toLocaleString()} pages total) from the server vault. This describes indexing and does not recheck PDF bytes.`
         );
       } else {
         setErrorMessage(
@@ -421,8 +421,8 @@ export function GoogleDriveBookSyncModal({
         if (record.processingStatus === 'verified_complete') {
           setSuccessMessage(
             lang === 'ar'
-              ? `[${badgeMeta.label}] تم استيراد والتحقق من ملف PDF الأصلي "${record.sourceFileName || record.fileName}" (${record.totalPages} صفحة • ${record.totalChapters} فصلاً)!`
-              : `[${badgeMeta.label}] Verified and indexed 100% of "${record.sourceFileName || record.fileName}" (${record.totalPages} pages • ${record.totalChapters} chapters)!`
+              ? `[${badgeMeta.label}] فُهرست كل صفحات "${record.sourceFileName || record.fileName}" (${record.totalPages} صفحة • ${record.totalChapters} فصلًا).`
+              : `[${badgeMeta.label}] Indexed all pages of "${record.sourceFileName || record.fileName}" (${record.totalPages} pages • ${record.totalChapters} chapters).`
           );
         } else {
           setErrorMessage(
@@ -511,13 +511,13 @@ export function GoogleDriveBookSyncModal({
             <div>
               <h2 className="font-bold text-sm sm:text-base">
                 {lang === 'ar'
-                  ? 'منظومة استيراد والتحقق من ملفات PDF الطبية الأصلية الكاملة (Google Drive & Local PDF)'
-                  : 'Authentic Full-PDF Medical Reference Ingestion, Verification & Diagnostic Vault'}
+                  ? 'استيراد وفهرسة مراجع PDF الطبية (Google Drive والملفات المحلية)'
+                  : 'Medical PDF Reference Import, Indexing & Diagnostics'}
               </h2>
               <p className="text-xs text-slate-400">
                 {lang === 'ar'
-                  ? 'فصل صارم بين ملفات PDF الأصلية الموثّقة (SHA-256) والملخصات المدمجة، مع تتبع الصفحات النصية والمصورة (OCR) والجداول'
-                  : 'Strict separation between SHA-256 verified original PDFs and built-in summaries, tracking native text, OCR, and tables'}
+                  ? 'تمييز ملفات PDF المستوردة عن الملخصات المدمجة، وتتبع الصفحات النصية وOCR والجداول. بصمة SHA-256 المسجلة لا تعادل إعادة فحص بايتات الملف.'
+                  : 'Separates imported PDFs from embedded summaries and tracks native text, OCR and tables. A stored SHA-256 value is not a recheck of PDF bytes.'}
               </p>
             </div>
           </div>
@@ -648,8 +648,8 @@ export function GoogleDriveBookSyncModal({
                   </div>
                   <p className="text-[11px] text-slate-300 mt-0.5">
                     {lang === 'ar'
-                      ? 'لا يُصنّف أي مرجع كـ «مكتمل التحقق» إلا بعد التحقق من توقيع %PDF- وبصمة SHA-256 واكتمال استخراج كافة الصفحات.'
-                      : 'A book is marked "Verified Complete" ONLY when its %PDF- signature, SHA-256 hash, and 100% of pages are verified.'}
+                      ? '«اكتملت معالجة الصفحات» تعني أن الفهرس يسجل معالجة كل الصفحات. لا تثبت سلامة الملف إلا عند توفر بايتات PDF ومطابقة التوقيع وبصمة SHA-256 معها؛ ولا تعني مراجعة سريرية.'
+                      : '“All Pages Processed” means the index records page coverage. File integrity is established only when cached PDF bytes are available and both the %PDF- signature and SHA-256 match; this is not clinical review.'}
                   </p>
                 </div>
               </div>
@@ -699,10 +699,10 @@ export function GoogleDriveBookSyncModal({
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1 text-xs">
                 <div className="p-2.5 rounded-xl bg-slate-800/80 border border-slate-700/80">
                   <div className="text-[10px] text-slate-400">
-                    {lang === 'ar' ? 'ملفات PDF الأصلية المكتملة' : 'Verified Original PDFs'}
+                    {lang === 'ar' ? 'سجلات PDF المستوردة المكتملة الفهرسة' : 'Fully Indexed Imported PDF Records'}
                   </div>
                   <div className="font-mono font-bold text-sm text-emerald-300 mt-0.5">
-                    {vaultDiag.totalVerifiedOriginalPdfs}{' '}
+                    {vaultDiag.totalFullyIndexedOriginalPdfRecords}{' '}
                     <span className="text-[10px] font-normal text-slate-400">
                       ({vaultDiag.totalEmbeddedSummaries}{' '}
                       {lang === 'ar' ? 'ملخص مدمج' : 'summary'})
@@ -849,8 +849,8 @@ export function GoogleDriveBookSyncModal({
                 <BookOpenCheck className="w-4 h-4 text-teal-600" />
                 <span>
                   {lang === 'ar'
-                    ? '2. حالة استيراد والتحقق من المراجع الطبية السبعة'
-                    : '2. Reference Textbooks Ingestion & Verification Status'}
+                    ? '2. حالة استيراد وفهرسة المراجع الطبية السبعة'
+                    : '2. Reference Textbooks Import & Indexing Status'}
                 </span>
               </h3>
             </div>
@@ -916,7 +916,7 @@ export function GoogleDriveBookSyncModal({
                                 title={
                                   vaultBook?.hasBinaryPdf
                                     ? 'Download cached original PDF'
-                                    : 'Download original PDF or full verbatim index'
+                                    : 'Download original PDF or indexed text record'
                                 }
                               >
                                 <Download className="w-3 h-3" />

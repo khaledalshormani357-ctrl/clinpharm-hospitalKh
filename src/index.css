@@ -1,13 +1,102 @@
 @import "tailwindcss";
 
+/*
+ * Clinical workspace design tokens.
+ * Keep the brand palette stable; surface and status tokens adapt to the active theme.
+ */
+:root {
+  color-scheme: light;
+  --clinical-navy: #173b57;
+  --clinical-teal: #147d83;
+  --clinical-page: #f3f6f8;
+  --clinical-surface: #ffffff;
+  --clinical-surface-subtle: #f8fafb;
+  --clinical-text: #172b3a;
+  --clinical-muted: #657786;
+  --clinical-border: #e2e8ee;
+  --clinical-focus: #147d83;
+  --clinical-success: #176b4d;
+  --clinical-success-soft: #e9f5ef;
+  --clinical-warning: #805600;
+  --clinical-warning-soft: #fff5db;
+  --clinical-danger: #a52a24;
+  --clinical-danger-soft: #fff0ef;
+  --clinical-info: #205f91;
+  --clinical-info-soft: #eaf3fa;
+  --clinical-font-latin: "Inter", "Cairo", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --clinical-font-arabic: "Cairo", "Inter", Tahoma, sans-serif;
+}
+
+.dark {
+  color-scheme: dark;
+  --clinical-page: #101a22;
+  --clinical-surface: #17242e;
+  --clinical-surface-subtle: #1c2b36;
+  --clinical-text: #e4edf2;
+  --clinical-muted: #a2b2bd;
+  --clinical-border: #30414d;
+  --clinical-focus: #73c5c6;
+  --clinical-success: #8bd1ad;
+  --clinical-success-soft: #17372e;
+  --clinical-warning: #f2ca73;
+  --clinical-warning-soft: #3b301b;
+  --clinical-danger: #ffaaa3;
+  --clinical-danger-soft: #402523;
+  --clinical-info: #9dc9ef;
+  --clinical-info-soft: #1b3040;
+}
+
+@theme inline {
+  --color-clinical-navy: var(--clinical-navy);
+  --color-clinical-teal: var(--clinical-teal);
+  --color-clinical-page: var(--clinical-page);
+  --color-clinical-surface: var(--clinical-surface);
+  --color-clinical-surface-subtle: var(--clinical-surface-subtle);
+  --color-clinical-text: var(--clinical-text);
+  --color-clinical-muted: var(--clinical-muted);
+  --color-clinical-border: var(--clinical-border);
+  --color-clinical-focus: var(--clinical-focus);
+  --color-clinical-success: var(--clinical-success);
+  --color-clinical-success-soft: var(--clinical-success-soft);
+  --color-clinical-warning: var(--clinical-warning);
+  --color-clinical-warning-soft: var(--clinical-warning-soft);
+  --color-clinical-danger: var(--clinical-danger);
+  --color-clinical-danger-soft: var(--clinical-danger-soft);
+  --color-clinical-info: var(--clinical-info);
+  --color-clinical-info-soft: var(--clinical-info-soft);
+  --font-sans: var(--clinical-font-latin);
+  --font-clinical-arabic: var(--clinical-font-arabic);
+  --radius-clinical: 0.5rem;
+  --shadow-clinical: 0 1px 2px rgb(23 43 58 / 0.06);
+  --spacing-clinical-page: clamp(1rem, 3vw, 2rem);
+}
+
 @layer base {
   html {
     -webkit-tap-highlight-color: transparent;
     scroll-behavior: smooth;
   }
   body {
-    font-family: 'Cairo', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: var(--clinical-font-latin);
     overscroll-behavior-y: none;
+  }
+
+  html:lang(ar) body {
+    font-family: var(--clinical-font-arabic);
+  }
+
+  html:lang(en) body {
+    font-family: var(--clinical-font-latin);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--clinical-focus);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: var(--clinical-teal);
+    color: #ffffff;
   }
 }
 

@@ -61,7 +61,7 @@ export function GuidelinesPanel({
   initialTargetUri,
   onOpenLocalReference
 }: Props) {
-  // Primary Mode Switcher: 'library' (Full Verbatim Medical Library) vs 'simulator' (Applied Case Simulation) vs 'explorer' (In-App Book/Chapter/Table Explorer)
+  // Primary Mode Switcher: in-app references vs. case simulation vs. the book/chapter/table explorer.
   const [viewMode, setViewMode] = useState<'library' | 'simulator' | 'explorer'>('library');
   const [libraryChapterId, setLibraryChapterId] = useState<string | undefined>(undefined);
 
@@ -547,8 +547,8 @@ export function GuidelinesPanel({
               <BookMarked className="w-4 h-4 shrink-0" />
               <span>
                 {lang === 'ar'
-                  ? '📖 المكتبة المرجعية الكاملة (Full Medical Library)'
-                  : '📖 Full Verbatim Medical Library (Unabridged)'}
+                  ? '📖 مجموعة المراجع الطبية داخل التطبيق'
+                  : '📖 In-App Medical Reference Collection'}
               </span>
             </button>
 
@@ -839,7 +839,7 @@ export function GuidelinesPanel({
       )}
 
       {/* =====================================================================
-          MODE 0: FULL VERBATIM MEDICAL REFERENCE LIBRARY (UNABRIDGED & INDEXED)
+          MODE 0: IN-APP MEDICAL REFERENCE RECORDS (SOURCE LAYER SHOWN WHEN AVAILABLE)
          ===================================================================== */}
       {viewMode === 'library' && (
         <div className="space-y-4">
