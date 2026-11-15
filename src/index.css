@@ -100,6 +100,28 @@
   }
 }
 
+@layer components {
+  .field {
+    width: 100%;
+    min-height: 2.75rem;
+    border: 1px solid var(--clinical-border);
+    border-radius: var(--radius-clinical);
+    background: var(--clinical-surface-subtle);
+    padding: 0.625rem 0.75rem;
+    color: var(--clinical-text);
+    font-size: 0.875rem;
+  }
+
+  textarea.field {
+    min-height: 5.5rem;
+  }
+
+  .field:focus {
+    outline: 2px solid var(--clinical-focus);
+    outline-offset: 1px;
+  }
+}
+
 /* Custom scrollbars */
 ::-webkit-scrollbar {
   width: 6px;

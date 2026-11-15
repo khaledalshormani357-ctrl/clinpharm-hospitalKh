@@ -35,6 +35,7 @@ import { GuidelinesPanel } from './workspace/GuidelinesPanel';
 import { TrainingPanel } from './workspace/TrainingPanel';
 import { UsersAdminPanel } from './workspace/UsersAdminPanel';
 import { PatientWorkspaceHeader } from './workspace/PatientWorkspaceHeader';
+import { PatientCard } from './workspace/PatientCard';
 import { CopilotDialog } from './CopilotDialog';
 import { PatientDetailsModal } from './PatientDetailsModal';
 import { NewPatientModal } from './NewPatientModal';
@@ -438,7 +439,7 @@ export function DashboardLayout({
               </div>
             </div>
 
-            {/* Patient Cards Grid — Ergonomic Mobile Cards on Android, 2-col on Desktop */}
+            {/* Patient cards — shared clinical workspace card */}
             {filteredPatients.length === 0 ? (
               <ClinicalEmptyState
                 className="rounded-clinical border border-dashed border-clinical-border bg-clinical-surface"
@@ -452,193 +453,26 @@ export function DashboardLayout({
                 }
               />
             ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
-              {filteredPatients.map(patient => {
-                const crcl = calculateCrCl(
-                  patient.age,
-                  patient.weight,
-                  patient.height,
-                  patient.gender,
-                  patient.labs.serumCreatinine
-                );
-                const safety = analyzePatientSafety(patient);
-                const statusStyle = getStatusBadgeStyle(patient.status);
-
-                return (
-                  <div
+              <div className="grid grid-cols-1 gap-4 sm:gap-5 md:grid-cols-2">
+                {filteredPatients.map(patient => (
+                  <PatientCard
                     key={patient.id}
-                    className={`bg-white dark:bg-slate-900 rounded-2xl sm:rounded-3xl p-4 sm:p-5 border ${statusStyle.cardBorderClass} shadow-xs hover:shadow-md transition flex flex-col justify-between`}
-                  >
-                    <div>
-                      {/* Card Header */}
-                      <div className="flex items-start justify-between gap-2 mb-3">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <div
-                            dir="ltr"
-                            className={`w-11 h-11 rounded-2xl flex items-center justify-center font-extrabold text-sm shrink-0 ${statusStyle.avatarClass}`}
-                          >
-                            {patient.age}y
-                          </div>
-
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              <h3 className="font-extrabold text-sm sm:text-base text-slate-900 dark:text-slate-100 truncate">
-                                {lang === 'ar' ? patient.name : patient.nameEn}
-                              </h3>
-                              <span
-                                dir="ltr"
-                                className="text-[10px] font-mono font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 px-2 py-0.5 rounded-md"
-                              >
-                                {patient.mrn}
-                              </span>
-                            </div>
-                            <p className="text-[11px] text-slate-500 mt-0.5 truncate">
-                              {t.wards[patient.ward]} • <span dir="ltr">{patient.room} ({patient.bed})</span>
-                            </p>
-                          </div>
-                        </div>
-
-                        {/* Color-Coded Visual Status Badge with Animated Indicator Dot */}
-                        <span
-                          className={`text-[10px] px-2.5 py-1 rounded-full font-extrabold shrink-0 inline-flex items-center gap-1.5 ${statusStyle.badgeClass}`}
-                        >
-                          <span className="relative flex h-2 w-2">
-                            {(patient.status === 'critical' || patient.status === 'observation') && (
-                              <span
-                                className={`absolute inline-flex h-full w-full rounded-full opacity-75 ${statusStyle.dotClass}`}
-                              />
-                            )}
-                            <span className={`relative inline-flex rounded-full h-2 w-2 ${statusStyle.solidDotClass}`} />
-                          </span>
-                          <span>{t.status[patient.status]}</span>
-                        </span>
-                      </div>
-
-                      {/* e-Casebook Chief Complaint (CC) & Vital Signs Quick Strip */}
-                      {patient.caseReport && (
-                        <div className="mb-3 p-2.5 rounded-xl bg-slate-50/90 dark:bg-slate-800/50 border border-slate-200/70 dark:border-slate-800 space-y-1.5">
-                          <div className="flex items-start justify-between gap-2">
-                            <p className="text-[11px] text-slate-700 dark:text-slate-300 line-clamp-1 font-medium">
-                              <span className="font-extrabold text-teal-700 dark:text-teal-400 me-1">CC:</span>
-                              {patient.caseReport.chiefComplaint}
-                            </p>
-                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-teal-100/80 dark:bg-teal-950 text-teal-800 dark:text-teal-300 shrink-0">
-                              e-Casebook
-                            </span>
-                          </div>
-                          <div dir="ltr" className="flex flex-wrap items-center gap-2 text-[10px] font-mono text-slate-600 dark:text-slate-400">
-                            <span className="px-1.5 py-0.5 rounded bg-white dark:bg-slate-900 border border-slate-200/70 dark:border-slate-700">
-                              BP: <strong className="text-slate-800 dark:text-slate-200">{patient.caseReport.vitals.bp}</strong>
-                            </span>
-                            <span className="px-1.5 py-0.5 rounded bg-white dark:bg-slate-900 border border-slate-200/70 dark:border-slate-700">
-                              HR: <strong className="text-slate-800 dark:text-slate-200">{patient.caseReport.vitals.hr}</strong> bpm
-                            </span>
-                            <span className="px-1.5 py-0.5 rounded bg-white dark:bg-slate-900 border border-slate-200/70 dark:border-slate-700">
-                              SpO2: <strong className="text-slate-800 dark:text-slate-200">{patient.caseReport.vitals.spo2}</strong>
-                            </span>
-                            <span className="px-1.5 py-0.5 rounded bg-white dark:bg-slate-900 border border-slate-200/70 dark:border-slate-700">
-                              T: <strong className="text-slate-800 dark:text-slate-200">{patient.caseReport.vitals.temp}°C</strong>
-                            </span>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Primary Diagnoses Preview Chips */}
-                      <div className="flex flex-wrap gap-1.5 mb-3">
-                        {patient.diagnoses.slice(0, 2).map((diag, idx) => (
-                          <span
-                            key={idx}
-                            dir="ltr"
-                            className="text-[10px] font-semibold bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 px-2 py-0.5 rounded-lg truncate max-w-full"
-                          >
-                            {diag}
-                          </span>
-                        ))}
-                      </div>
-
-                      {/* Clinical Indices Strip */}
-                      <div className="grid grid-cols-3 gap-2 text-xs mb-3">
-                        <div className="bg-slate-50 dark:bg-slate-800/60 p-2.5 rounded-xl border border-slate-100 dark:border-slate-800">
-                          <span className="text-slate-400 block text-[10px]">SCr</span>
-                          <span dir="ltr" className="font-bold text-slate-800 dark:text-slate-200 font-mono text-xs sm:text-sm">
-                            {patient.labs.serumCreatinine} mg/dL
-                          </span>
-                        </div>
-
-                        <div className="bg-slate-50 dark:bg-slate-800/60 p-2.5 rounded-xl border border-slate-100 dark:border-slate-800">
-                          <span className="text-slate-400 block text-[10px]">CrCl (CG)</span>
-                          <span
-                            dir="ltr"
-                            className={`font-bold font-mono text-xs sm:text-sm ${
-                              crcl.crcl < 30 ? 'text-rose-600 dark:text-rose-400' : 'text-teal-600 dark:text-teal-400'
-                            }`}
-                          >
-                            {crcl.crcl} mL/m
-                          </span>
-                        </div>
-
-                        <div className="bg-slate-50 dark:bg-slate-800/60 p-2.5 rounded-xl border border-slate-100 dark:border-slate-800">
-                          <span className="text-slate-400 block text-[10px]">Active MAR</span>
-                          <span className="font-bold text-slate-800 dark:text-slate-200 font-mono text-xs sm:text-sm">
-                            {patient.activeMedications.length} Orders
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Allergies & Safety Badges */}
-                      <div className="space-y-1.5 mb-3 text-xs">
-                        {patient.allergies.length > 0 && (
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="text-[10px] font-bold text-rose-600">Allergies:</span>
-                            {patient.allergies.map((a, i) => (
-                              <span
-                                key={i}
-                                dir="ltr"
-                                className="text-[10px] bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300 px-2 py-0.5 rounded font-bold border border-rose-200/50"
-                              >
-                                {a}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-
-                        {safety.criticalAlerts.length > 0 && (
-                          <div className="p-2 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/50 text-[11px] text-rose-800 dark:text-rose-200 font-bold flex items-center gap-1.5">
-                            <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-rose-600" />
-                            <span className="line-clamp-1">{safety.criticalAlerts[0]}</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Card Actions — Minimum 44px touch targets for Android */}
-                    <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
-                      <button
-                        onClick={() => setSelectedPatient(patient)}
-                        className="flex-1 min-h-[44px] py-2 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-bold transition text-center active:scale-[0.99]"
-                      >
-                        {lang === 'ar' ? 'ملف المريض & Case Report' : t.patient.viewFile}
-                      </button>
-
-                      <button
-                        onClick={() => {
-                          setSelectedPatient(patient);
-                          handleOpenInterventionModal(patient);
-                        }}
-                        className="min-h-[44px] py-2 px-3.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold transition shadow-xs active:scale-[0.99]"
-                      >
-                        {lang === 'ar' ? '+ توثيق DRP' : '+ Log DRP'}
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+                    patient={patient}
+                    lang={lang}
+                    wardLabel={t.wards[patient.ward]}
+                    statusLabel={t.status[patient.status]}
+                    onOpen={setSelectedPatient}
+                    onLogIntervention={patientToLog => {
+                      setSelectedPatient(patientToLog);
+                      handleOpenInterventionModal(patientToLog);
+                    }}
+                  />
+                ))}
+              </div>
             )}
           </div>
         )}
 
-        {/* TAB 2: Medication Reconciliation */}
         {activeTab === 'reconciliation' && (
           <ReconciliationPanel
             patients={patients}

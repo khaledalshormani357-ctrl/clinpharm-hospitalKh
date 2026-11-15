@@ -1,6 +1,8 @@
-import React, { useState } from "react";
-import { RefreshCw, CheckCircle2, AlertCircle, ArrowRight, Plus, Check, X } from "lucide-react";
-import { Patient, ReconciliationDiscrepancy, Language } from "../../types/clinical";
+import { useState } from 'react';
+import type { FormEvent, ReactNode } from 'react';
+import { AlertCircle, ArrowRight, Check, CheckCircle2, Plus, RefreshCw, X } from 'lucide-react';
+import type { Language, Patient, ReconciliationDiscrepancy } from '../../types/clinical';
+import { ClinicalBadge, ClinicalPanel } from '../ui/clinical';
 
 interface ReconciliationPanelProps {
   patients: Patient[];
@@ -10,339 +12,113 @@ interface ReconciliationPanelProps {
   lang: Language;
 }
 
+type Filter = 'all' | 'unresolved' | 'resolved';
+
 export function ReconciliationPanel({ patients, discrepancies, onAddDiscrepancy, onResolveDiscrepancy, lang }: ReconciliationPanelProps) {
-  const [filter, setFilter] = useState<"all" | "unresolved" | "resolved">("all");
+  const isArabic = lang === 'ar';
+  const [filter, setFilter] = useState<Filter>('all');
   const [isAdding, setIsAdding] = useState(false);
+  const [patientId, setPatientId] = useState(patients[0]?.id || 'pt-1');
+  const [drugName, setDrugName] = useState('');
+  const [homePrescription, setHomePrescription] = useState('');
+  const [hospitalOrder, setHospitalOrder] = useState('');
+  const [type, setType] = useState<ReconciliationDiscrepancy['type']>('omission');
+  const [clinicalSignificance, setClinicalSignificance] = useState<ReconciliationDiscrepancy['clinicalSignificance']>('major');
+  const [pharmacistAction, setPharmacistAction] = useState('');
 
-  const [patientId, setPatientId] = useState(patients[0]?.id || "pt-1");
-  const [drugName, setDrugName] = useState("");
-  const [homePrescription, setHomePrescription] = useState("");
-  const [hospitalOrder, setHospitalOrder] = useState("");
-  const [type, setType] = useState<ReconciliationDiscrepancy["type"]>("omission");
-  const [clinicalSignificance, setClinicalSignificance] = useState<ReconciliationDiscrepancy["clinicalSignificance"]>("major");
-  const [pharmacistAction, setPharmacistAction] = useState("");
+  const unresolvedCount = discrepancies.filter(item => item.clarificationStatus === 'unresolved').length;
+  const resolvedCount = discrepancies.length - unresolvedCount;
+  const filteredList = discrepancies.filter(item => filter === 'all' || (filter === 'unresolved' ? item.clarificationStatus === 'unresolved' : item.clarificationStatus !== 'unresolved'));
 
-  const handleAdd = (e: React.FormEvent) => {
-    e.preventDefault();
-    const newItem: ReconciliationDiscrepancy = {
-      id: `disc-${Date.now()}`,
-      patientId,
-      drugName,
-      type,
-      homePrescription,
-      hospitalOrder,
-      clinicalSignificance,
-      clarificationStatus: "unresolved",
-      pharmacistAction
-    };
-    onAddDiscrepancy(newItem);
+  const getPatientName = (id: string) => {
+    const patient = patients.find(item => item.id === id);
+    return patient ? (isArabic ? `${patient.name} (${patient.ward})` : `${patient.nameEn} (${patient.ward})`) : id;
+  };
+
+  const getTypeLabel = (value: ReconciliationDiscrepancy['type']) => ({
+    omission: isArabic ? 'إغفال دواء منزلي' : 'Drug omission',
+    commission: isArabic ? 'إضافة غير مبررة' : 'Unjustified addition',
+    dose_mismatch: isArabic ? 'اختلاف الجرعة' : 'Dose mismatch',
+    frequency_mismatch: isArabic ? 'اختلاف التكرار' : 'Frequency mismatch',
+    duplicate_therapy: isArabic ? 'ازدواجية علاجية' : 'Therapeutic duplication',
+  })[value];
+
+  const handleAdd = (event: FormEvent) => {
+    event.preventDefault();
+    onAddDiscrepancy({ id: `disc-${Date.now()}`, patientId, drugName, type, homePrescription, hospitalOrder, clinicalSignificance, clarificationStatus: 'unresolved', pharmacistAction });
     setIsAdding(false);
-    setDrugName("");
-    setHomePrescription("");
-    setHospitalOrder("");
-    setPharmacistAction("");
-  };
-
-  const filteredList = discrepancies.filter(item => {
-    if (filter === "unresolved") return item.clarificationStatus === "unresolved";
-    if (filter === "resolved") return item.clarificationStatus === "resolved" || item.clarificationStatus === "intentional";
-    return true;
-  });
-
-  const getPatientName = (pid: string) => {
-    const pt = patients.find(p => p.id === pid);
-    if (!pt) return pid;
-    return lang === 'ar' ? `${pt.name} (${pt.ward})` : `${pt.nameEn} (${pt.ward})`;
-  };
-
-  const getTypeLabel = (t: ReconciliationDiscrepancy["type"]) => {
-    switch (t) {
-      case "omission":
-        return lang === 'ar' ? 'إغفال دواء منزلي (Drug Omission)' : 'Drug Omission';
-      case "commission":
-        return lang === 'ar' ? 'إضافة غير مبررة (Commission)' : 'Unjustified Addition';
-      case "dose_mismatch":
-        return lang === 'ar' ? 'اختلاف الجرعة (Dose Mismatch)' : 'Dose Mismatch';
-      case "frequency_mismatch":
-        return lang === 'ar' ? 'اختلاف التكرار (Frequency Mismatch)' : 'Frequency Mismatch';
-      case "duplicate_therapy":
-        return lang === 'ar' ? 'ازدواجية علاجية (Duplicate Therapy)' : 'Therapeutic Duplication';
-    }
+    setDrugName(''); setHomePrescription(''); setHospitalOrder(''); setPharmacistAction('');
   };
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      <div className="bg-white dark:bg-slate-900 p-4 sm:p-6 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-start gap-3">
-          <div className="bg-blue-50 dark:bg-blue-950/50 p-2.5 rounded-xl text-blue-600 dark:text-blue-400 border border-blue-100 dark:border-blue-900/50 shrink-0">
-            <RefreshCw className="h-5 w-5 sm:h-6 sm:w-6" />
-          </div>
-          <div>
-            <h2 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white">
-              {lang === 'ar'
-                ? 'المطابقة الدوائية عند التنويم والتحويل (Medication Reconciliation - MedRec)'
-                : 'Medication Reconciliation (Admission / Transfer / Discharge)'}
-            </h2>
-            <p className="text-slate-500 dark:text-slate-400 text-xs sm:text-sm mt-0.5 leading-relaxed">
-              {lang === 'ar'
-                ? 'مقارنة Home Medications مع أوامر التنويم (Active Inpatient MAR) لرصد Omissions، Dose Mismatches، والإيقاف المؤقت المقصود.'
-                : 'Compare pre-admission home regimens with active inpatient orders to resolve omissions and dosing discrepancies.'}
-            </p>
-          </div>
+      <ClinicalPanel
+        title={<span className="flex items-center gap-2"><RefreshCw aria-hidden="true" className="size-5 text-clinical-teal" />{isArabic ? 'المطابقة الدوائية عند الانتقال' : 'Medication reconciliation workspace'}</span>}
+        description={isArabic ? 'قارن أدوية المنزل بأوامر التنويم، ثم وثّق الإجراء واحسم الاختلافات.' : 'Compare home medications with inpatient orders, document the action, and close discrepancies.'}
+        actions={<button type="button" onClick={() => setIsAdding(true)} className="inline-flex min-h-10 items-center gap-2 rounded-clinical bg-clinical-teal px-3 text-xs font-semibold text-white hover:brightness-95"><Plus aria-hidden="true" className="size-4" />{isArabic ? 'تسجيل اختلاف' : 'Log discrepancy'}</button>}
+      >
+        <div className="grid grid-cols-3 gap-2">
+          <SummaryMetric label={isArabic ? 'كل الاختلافات' : 'All discrepancies'} value={discrepancies.length} tone="info" />
+          <SummaryMetric label={isArabic ? 'قيد المراجعة' : 'Needs review'} value={unresolvedCount} tone="review" />
+          <SummaryMetric label={isArabic ? 'تمت التسوية' : 'Resolved'} value={resolvedCount} tone="verified" />
         </div>
-        <button 
-          onClick={() => setIsAdding(true)}
-          className="flex items-center justify-center gap-2 bg-teal-600 text-white px-4 py-2.5 min-h-[44px] rounded-xl text-xs sm:text-sm font-bold hover:bg-teal-500 transition-colors shadow-xs cursor-pointer shrink-0"
-        >
-          <Plus className="h-4 w-4" />
-          {lang === 'ar' ? '+ تسجيل Discrepancy جديدة' : '+ Add MedRec Discrepancy'}
-        </button>
-      </div>
+      </ClinicalPanel>
 
-      {/* Android Bottom-Sheet Modal for Add Discrepancy */}
-      {isAdding && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
-          <div className="bg-white dark:bg-slate-900 w-full sm:max-w-lg rounded-t-3xl sm:rounded-3xl shadow-2xl border-t sm:border border-slate-200 dark:border-slate-800 overflow-hidden max-h-[90dvh] flex flex-col animate-in slide-in-from-bottom sm:zoom-in-95 duration-200">
-            <div className="sm:hidden flex justify-center pt-2.5 pb-1 bg-slate-50 dark:bg-slate-800/50">
-              <div className="w-10 h-1.5 rounded-full bg-slate-300 dark:bg-slate-700" />
-            </div>
-            <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/50">
-              <h3 className="font-bold text-slate-900 dark:text-white text-sm sm:text-base">
-                {lang === 'ar' ? 'تسجيل اختلاف مطابقة دوائية (New MedRec Discrepancy)' : 'Log Medication Reconciliation Discrepancy'}
-              </h3>
-              <button onClick={() => setIsAdding(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 p-1.5 rounded-full">
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <form onSubmit={handleAdd} className="p-5 space-y-4 overflow-y-auto">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-                  {lang === 'ar' ? 'المريض (Inpatient)' : 'Select Patient'}
-                </label>
-                <select
-                  value={patientId}
-                  onChange={e => setPatientId(e.target.value)}
-                  className="w-full px-3.5 py-2.5 min-h-[44px] bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white"
-                >
-                  {patients.map(pt => (
-                    <option key={pt.id} value={pt.id}>
-                      {lang === 'ar' ? pt.name : pt.nameEn} ({pt.mrn})
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-                  {lang === 'ar' ? 'اسم الدواء (Medication Name)' : 'Medication Name'}
-                </label>
-                <input
-                  required
-                  type="text"
-                  dir="ltr"
-                  placeholder="e.g., Lisinopril, Metformin, Apixaban"
-                  value={drugName}
-                  onChange={e => setDrugName(e.target.value)}
-                  className="w-full px-3.5 py-2.5 min-h-[44px] bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white"
-                />
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-                    {lang === 'ar' ? 'النظام المنزلي (Home Regimen)' : 'Home Regimen'}
-                  </label>
-                  <input
-                    required
-                    type="text"
-                    dir="ltr"
-                    placeholder="e.g., 20 mg PO Daily"
-                    value={homePrescription}
-                    onChange={e => setHomePrescription(e.target.value)}
-                    className="w-full px-3.5 py-2.5 min-h-[44px] bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-                    {lang === 'ar' ? 'الأمر الداخلي (Inpatient Order)' : 'Inpatient Order'}
-                  </label>
-                  <input
-                    required
-                    type="text"
-                    dir="ltr"
-                    placeholder="e.g., Held (AKI) / Omitted"
-                    value={hospitalOrder}
-                    onChange={e => setHospitalOrder(e.target.value)}
-                    className="w-full px-3.5 py-2.5 min-h-[44px] bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white"
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-                    {lang === 'ar' ? 'نوع الاختلاف (Discrepancy Type)' : 'Discrepancy Type'}
-                  </label>
-                  <select
-                    value={type}
-                    onChange={e => setType(e.target.value as ReconciliationDiscrepancy["type"])}
-                    className="w-full px-3.5 py-2.5 min-h-[44px] bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white"
-                  >
-                    <option value="omission">Omission (إغفال دواء منزلي)</option>
-                    <option value="dose_mismatch">Dose Mismatch (اختلاف الجرعة)</option>
-                    <option value="frequency_mismatch">Frequency Mismatch (اختلاف التكرار)</option>
-                    <option value="duplicate_therapy">Duplicate Therapy (ازدواجية علاجية)</option>
-                    <option value="commission">Commission (إضافة غير مبررة)</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-                    {lang === 'ar' ? 'الأهمية السريرية (Significance)' : 'Clinical Significance'}
-                  </label>
-                  <select
-                    value={clinicalSignificance}
-                    onChange={e => setClinicalSignificance(e.target.value as ReconciliationDiscrepancy["clinicalSignificance"])}
-                    className="w-full px-3.5 py-2.5 min-h-[44px] bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white"
-                  >
-                    <option value="major">Major (عالي الخطورة)</option>
-                    <option value="moderate">Moderate (متوسط)</option>
-                    <option value="minor">Minor (بسيط)</option>
-                  </select>
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-                  {lang === 'ar' ? 'توصية الصيدلي الإكلينيكي (Pharmacist Action Plan)' : 'Pharmacist Action Plan'}
-                </label>
-                <textarea
-                  required
-                  rows={3}
-                  value={pharmacistAction}
-                  onChange={e => setPharmacistAction(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white"
-                />
-              </div>
-              <div className="pt-2 flex justify-end gap-2 pb-safe">
-                <button type="button" onClick={() => setIsAdding(false)} className="px-4 py-2.5 min-h-[44px] rounded-xl text-xs sm:text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
-                  {lang === 'ar' ? 'إلغاء' : 'Cancel'}
-                </button>
-                <button type="submit" className="bg-teal-600 text-white px-5 py-2.5 min-h-[44px] rounded-xl text-xs sm:text-sm font-bold hover:bg-teal-500">
-                  {lang === 'ar' ? 'حفظ (Save)' : 'Save Discrepancy'}
-                </button>
-              </div>
-            </form>
-          </div>
+      {isAdding && <AddDiscrepancyModal {...{ isArabic, patients, patientId, setPatientId, drugName, setDrugName, homePrescription, setHomePrescription, hospitalOrder, setHospitalOrder, type, setType, clinicalSignificance, setClinicalSignificance, pharmacistAction, setPharmacistAction, onClose: () => setIsAdding(false), onSubmit: handleAdd }} />}
+
+      <ClinicalPanel
+        title={isArabic ? 'قائمة الاختلافات' : 'Discrepancy queue'}
+        description={isArabic ? 'ابدأ بالحالات غير المحسومة، ثم اعتمد النتيجة بعد التحقق.' : 'Start with unresolved items and confirm the result after verification.'}
+        actions={<div className="flex gap-1 overflow-x-auto" role="tablist">{([['all', isArabic ? 'الكل' : 'All', discrepancies.length], ['unresolved', isArabic ? 'قيد المراجعة' : 'Needs review', unresolvedCount], ['resolved', isArabic ? 'تمت التسوية' : 'Resolved', resolvedCount]] as const).map(([value, label, count]) => <button key={value} type="button" role="tab" aria-selected={filter === value} onClick={() => setFilter(value)} className={`min-h-9 whitespace-nowrap rounded-clinical px-2.5 text-xs font-semibold ${filter === value ? 'bg-clinical-navy text-white' : 'text-clinical-muted hover:bg-clinical-surface-subtle'}`}>{label} ({count})</button>)}</div>}
+      >
+        <div className="space-y-3">
+          {filteredList.length === 0 ? <div className="rounded-clinical border border-dashed border-clinical-border p-8 text-center text-sm text-clinical-muted">{isArabic ? 'لا توجد اختلافات في هذا العرض.' : 'No discrepancies in this view.'}</div> : filteredList.map(item => <DiscrepancyCard key={item.id} item={item} isArabic={isArabic} patientName={getPatientName(item.patientId)} typeLabel={getTypeLabel(item.type)} onResolve={onResolveDiscrepancy} />)}
         </div>
-      )}
-
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs overflow-hidden">
-        <div className="p-3 sm:p-4 border-b border-slate-100 dark:border-slate-800 flex gap-2 bg-slate-50/50 dark:bg-slate-800/30 overflow-x-auto no-scrollbar">
-          <button 
-            onClick={() => setFilter("all")}
-            className={`px-3.5 py-2 min-h-[38px] rounded-xl text-xs font-bold transition-colors cursor-pointer shrink-0 ${filter === "all" ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900" : "text-slate-600 dark:text-slate-400 hover:bg-slate-200/50 dark:hover:bg-slate-800"}`}
-          >
-            {lang === 'ar' ? 'الكل (All)' : 'All'} ({discrepancies.length})
-          </button>
-          <button 
-            onClick={() => setFilter("unresolved")}
-            className={`px-3.5 py-2 min-h-[38px] rounded-xl text-xs font-bold transition-colors cursor-pointer shrink-0 ${filter === "unresolved" ? "bg-amber-500 text-white" : "text-slate-600 dark:text-slate-400 hover:bg-slate-200/50 dark:hover:bg-slate-800"}`}
-          >
-            {lang === 'ar' ? 'قيد المراجعة (Unresolved)' : 'Unresolved'} ({discrepancies.filter(d => d.clarificationStatus === "unresolved").length})
-          </button>
-          <button 
-            onClick={() => setFilter("resolved")}
-            className={`px-3.5 py-2 min-h-[38px] rounded-xl text-xs font-bold transition-colors cursor-pointer shrink-0 ${filter === "resolved" ? "bg-emerald-600 text-white" : "text-slate-600 dark:text-slate-400 hover:bg-slate-200/50 dark:hover:bg-slate-800"}`}
-          >
-            {lang === 'ar' ? 'تمت التسوية (Resolved / Intentional)' : 'Resolved / Intentional'} ({discrepancies.filter(d => d.clarificationStatus !== "unresolved").length})
-          </button>
-        </div>
-
-        <div className="divide-y divide-slate-100 dark:divide-slate-800">
-          {filteredList.map((item) => {
-            const isResolved = item.clarificationStatus === "resolved" || item.clarificationStatus === "intentional";
-            return (
-              <div key={item.id} className="p-4 sm:p-6 hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-colors">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-                  <div>
-                    <span className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
-                      {getPatientName(item.patientId)}
-                    </span>
-                    <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white mt-0.5" dir="ltr">
-                      {item.drugName}
-                    </h3>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="px-2.5 py-1 rounded-md text-xs font-bold bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-400 border border-blue-200 dark:border-blue-800/50">
-                      {getTypeLabel(item.type)}
-                    </span>
-                    <span className={`px-2.5 py-1 rounded-md text-xs font-bold uppercase ${
-                      item.clinicalSignificance === "major"
-                        ? "bg-rose-50 text-rose-700 dark:bg-rose-950/50 dark:text-rose-400 border border-rose-200 dark:border-rose-800/50"
-                        : "bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-400 border border-amber-200 dark:border-amber-800/50"
-                    }`} dir="ltr">
-                      {item.clinicalSignificance}
-                    </span>
-                    <span className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${
-                      isResolved
-                        ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400"
-                        : "bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-400"
-                    }`}>
-                      {isResolved ? <CheckCircle2 className="h-3.5 w-3.5" /> : <AlertCircle className="h-3.5 w-3.5" />}
-                      {item.clarificationStatus === "intentional"
-                        ? (lang === 'ar' ? 'إيقاف مقصود (Intentional Hold)' : 'Intentional Hold')
-                        : isResolved
-                        ? (lang === 'ar' ? 'تمت المطابقة (Resolved)' : 'Resolved')
-                        : (lang === 'ar' ? 'بانتظار التأكيد (Unresolved)' : 'Unresolved')}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-11 gap-3 items-center bg-slate-50 dark:bg-slate-800/50 p-3.5 sm:p-4 rounded-xl border border-slate-200/60 dark:border-slate-700/50 mb-4">
-                  <div className="md:col-span-5">
-                    <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider block mb-1">
-                      {lang === 'ar' ? 'الدواء المنزلي (Home Regimen)' : 'Home Prescription'}
-                    </span>
-                    <span className="font-mono text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-200" dir="ltr">
-                      {item.homePrescription}
-                    </span>
-                  </div>
-                  <div className="md:col-span-1 flex justify-center py-1 md:py-0">
-                    <ArrowRight className={`h-4 w-4 text-slate-400 ${lang === 'ar' ? 'rotate-180' : ''}`} />
-                  </div>
-                  <div className="md:col-span-5">
-                    <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider block mb-1">
-                      {lang === 'ar' ? 'أمر التنويم (Hospital Order)' : 'Inpatient Order'}
-                    </span>
-                    <span className="font-mono text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-200" dir="ltr">
-                      {item.hospitalOrder}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
-                    <strong className="font-semibold text-slate-900 dark:text-slate-300">
-                      {lang === 'ar' ? 'إجراء الصيدلي (Pharmacist Action): ' : 'Pharmacist Action: '}
-                    </strong>
-                    {item.pharmacistAction}
-                  </p>
-                  {item.clarificationStatus === "unresolved" && (
-                    <button 
-                      onClick={() =>
-                        onResolveDiscrepancy(
-                          item.id,
-                          `${item.pharmacistAction} — [Verified & Resolved by Clinical Pharmacist]`
-                        )
-                      }
-                      className="flex items-center justify-center gap-1.5 bg-slate-900 dark:bg-white text-white dark:text-slate-900 px-3.5 py-2 min-h-[40px] rounded-xl text-xs font-bold hover:bg-slate-800 dark:hover:bg-slate-200 transition-colors cursor-pointer shrink-0"
-                    >
-                      <Check className="h-3.5 w-3.5" />
-                      {lang === 'ar' ? 'اعتماد المطابقة (Resolve)' : 'Mark Resolved'}
-                    </button>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+      </ClinicalPanel>
     </div>
   );
 }
+
+function SummaryMetric({ label, value, tone }: { label: string; value: number; tone: 'info' | 'review' | 'verified' }) {
+  return <div className="rounded-clinical border border-clinical-border bg-clinical-surface-subtle p-3"><ClinicalBadge tone={tone}>{label}</ClinicalBadge><div className="mt-2 text-2xl font-bold text-clinical-text" dir="ltr">{value}</div></div>;
+}
+
+function DiscrepancyCard({ item, isArabic, patientName, typeLabel, onResolve }: { item: ReconciliationDiscrepancy; isArabic: boolean; patientName: string; typeLabel: string; onResolve: (id: string, action: string) => void }) {
+  const resolved = item.clarificationStatus !== 'unresolved';
+  const significanceTone = item.clinicalSignificance === 'major' ? 'critical' : item.clinicalSignificance === 'moderate' ? 'review' : 'neutral';
+  return <article className="rounded-clinical border border-clinical-border bg-clinical-surface-subtle p-4 sm:p-5">
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><p className="text-xs font-medium text-clinical-muted">{patientName}</p><h3 className="mt-1 text-base font-bold text-clinical-text" dir="ltr">{item.drugName}</h3></div><div className="flex flex-wrap gap-1.5"><ClinicalBadge tone="info">{typeLabel}</ClinicalBadge><ClinicalBadge tone={significanceTone}>{item.clinicalSignificance}</ClinicalBadge><ClinicalBadge tone={resolved ? 'verified' : 'review'}>{resolved ? <><CheckCircle2 aria-hidden="true" className="size-3.5" />{isArabic ? 'تمت التسوية' : 'Resolved'}</> : <><AlertCircle aria-hidden="true" className="size-3.5" />{isArabic ? 'قيد المراجعة' : 'Needs review'}</>}</ClinicalBadge></div></div>
+    <div className="mt-4 grid gap-2 md:grid-cols-[1fr_auto_1fr] md:items-center"><Regimen label={isArabic ? 'النظام المنزلي' : 'Home regimen'} value={item.homePrescription} /><ArrowRight aria-hidden="true" className={`mx-auto size-4 text-clinical-muted ${isArabic ? 'rotate-180' : ''}`} /><Regimen label={isArabic ? 'أمر التنويم' : 'Inpatient order'} value={item.hospitalOrder} /></div>
+    <div className="mt-4 flex flex-col gap-3 border-t border-clinical-border pt-3 sm:flex-row sm:items-center sm:justify-between"><p className="text-sm leading-6 text-clinical-muted"><strong className="text-clinical-text">{isArabic ? 'إجراء الصيدلي: ' : 'Pharmacist action: '}</strong>{item.pharmacistAction}</p>{!resolved && <button type="button" onClick={() => onResolve(item.id, `${item.pharmacistAction} — [Verified & Resolved by Clinical Pharmacist]`)} className="inline-flex min-h-10 shrink-0 items-center justify-center gap-1.5 rounded-clinical bg-clinical-navy px-3 text-xs font-semibold text-white hover:brightness-110"><Check aria-hidden="true" className="size-4" />{isArabic ? 'اعتماد المطابقة' : 'Mark resolved'}</button>}</div>
+  </article>;
+}
+
+function Regimen({ label, value }: { label: string; value: string }) { return <div className="rounded-clinical border border-clinical-border bg-clinical-surface p-3"><span className="block text-[10px] font-semibold text-clinical-muted">{label}</span><span className="mt-1 block text-sm font-semibold text-clinical-text" dir="ltr">{value}</span></div>; }
+
+interface AddDiscrepancyModalProps {
+  isArabic: boolean;
+  patients: Patient[];
+  patientId: string;
+  setPatientId: (value: string) => void;
+  drugName: string;
+  setDrugName: (value: string) => void;
+  homePrescription: string;
+  setHomePrescription: (value: string) => void;
+  hospitalOrder: string;
+  setHospitalOrder: (value: string) => void;
+  type: ReconciliationDiscrepancy['type'];
+  setType: (value: ReconciliationDiscrepancy['type']) => void;
+  clinicalSignificance: ReconciliationDiscrepancy['clinicalSignificance'];
+  setClinicalSignificance: (value: ReconciliationDiscrepancy['clinicalSignificance']) => void;
+  pharmacistAction: string;
+  setPharmacistAction: (value: string) => void;
+  onClose: () => void;
+  onSubmit: (event: FormEvent) => void;
+}
+
+function AddDiscrepancyModal(props: AddDiscrepancyModalProps) {
+  const { isArabic, patients, patientId, setPatientId, drugName, setDrugName, homePrescription, setHomePrescription, hospitalOrder, setHospitalOrder, type, setType, clinicalSignificance, setClinicalSignificance, pharmacistAction, setPharmacistAction, onClose, onSubmit } = props;
+  return <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/60 p-0 backdrop-blur-sm sm:items-center sm:p-4"><div className="max-h-[92dvh] w-full overflow-y-auto rounded-t-3xl border border-clinical-border bg-clinical-surface p-5 shadow-2xl sm:max-w-xl sm:rounded-clinical"><div className="mb-4 flex items-center justify-between"><h2 className="text-base font-bold text-clinical-text">{isArabic ? 'تسجيل اختلاف مطابقة دوائية' : 'Log reconciliation discrepancy'}</h2><button type="button" onClick={onClose} className="rounded-clinical p-2 text-clinical-muted hover:bg-clinical-surface-subtle"><X aria-hidden="true" className="size-5" /></button></div><form onSubmit={onSubmit} className="space-y-4"><Field label={isArabic ? 'المريض' : 'Patient'}><select required value={patientId} onChange={event => setPatientId(event.target.value)} className="field">{patients.map(patient => <option key={patient.id} value={patient.id}>{isArabic ? patient.name : patient.nameEn} ({patient.mrn})</option>)}</select></Field><Field label={isArabic ? 'اسم الدواء' : 'Medication name'}><input required value={drugName} onChange={event => setDrugName(event.target.value)} className="field" dir="ltr" placeholder="e.g. Apixaban" /></Field><div className="grid gap-3 sm:grid-cols-2"><Field label={isArabic ? 'النظام المنزلي' : 'Home regimen'}><input required value={homePrescription} onChange={event => setHomePrescription(event.target.value)} className="field" dir="ltr" /></Field><Field label={isArabic ? 'أمر التنويم' : 'Inpatient order'}><input required value={hospitalOrder} onChange={event => setHospitalOrder(event.target.value)} className="field" dir="ltr" /></Field></div><div className="grid gap-3 sm:grid-cols-2"><Field label={isArabic ? 'نوع الاختلاف' : 'Discrepancy type'}><select value={type} onChange={event => setType(event.target.value as ReconciliationDiscrepancy['type'])} className="field"><option value="omission">Omission</option><option value="dose_mismatch">Dose mismatch</option><option value="frequency_mismatch">Frequency mismatch</option><option value="duplicate_therapy">Duplicate therapy</option><option value="commission">Commission</option></select></Field><Field label={isArabic ? 'الأهمية السريرية' : 'Clinical significance'}><select value={clinicalSignificance} onChange={event => setClinicalSignificance(event.target.value as ReconciliationDiscrepancy['clinicalSignificance'])} className="field"><option value="major">Major</option><option value="moderate">Moderate</option><option value="minor">Minor</option></select></Field></div><Field label={isArabic ? 'إجراء الصيدلي' : 'Pharmacist action plan'}><textarea required rows={3} value={pharmacistAction} onChange={event => setPharmacistAction(event.target.value)} className="field" /></Field><div className="flex justify-end gap-2"><button type="button" onClick={onClose} className="min-h-10 rounded-clinical px-4 text-xs font-semibold text-clinical-muted hover:bg-clinical-surface-subtle">{isArabic ? 'إلغاء' : 'Cancel'}</button><button type="submit" className="min-h-10 rounded-clinical bg-clinical-teal px-4 text-xs font-semibold text-white">{isArabic ? 'حفظ' : 'Save'}</button></div></form></div></div>;
+}
+
+function Field({ label, children }: { label: string; children: ReactNode }) { return <label className="block text-xs font-semibold text-clinical-text">{label}<span className="mt-1.5 block">{children}</span></label>; }
