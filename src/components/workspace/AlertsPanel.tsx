@@ -15,6 +15,8 @@ import {
 import { analyzePatientSafety } from "../../lib/clinical-engine";
 import { Patient, Language } from "../../types/clinical";
 import { DRUG_INTERACTIONS_DB } from "../../lib/mockData";
+import { AlertWorkspaceHeader } from "./AlertWorkspaceHeader";
+import { ClinicalAlert, ClinicalBadge } from "../ui/clinical";
 
 const STOCKLEYS_DRIVE_URL =
   "https://drive.google.com/file/d/1eg07NXxWYgJq0NxLf0Vim1JlV7KTu16S/view?usp=drivesdk";
@@ -228,63 +230,16 @@ export function AlertsPanel({
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      {/* Header Banner + Stockley's Drug Interactions Database Attribution */}
-      <div className="bg-white dark:bg-slate-900 p-4 sm:p-6 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div className="flex items-start gap-3">
-            <div className="bg-rose-50 dark:bg-rose-950/50 p-2.5 rounded-xl text-rose-600 dark:text-rose-400 border border-rose-100 dark:border-rose-900/50 shrink-0">
-              <ShieldAlert className="h-5 w-5 sm:h-6 sm:w-6" />
-            </div>
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white">
-                  {lang === "ar"
-                    ? "فحص السلامة والتعارضات الدوائية (Stockley’s Drug Interactions Engine)"
-                    : "Clinical Drug Safety & Stockley’s Drug Interactions Engine"}
-                </h2>
-                <span
-                  dir="ltr"
-                  className="text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800"
-                >
-                  Stockley’s DDI DB • {DRUG_INTERACTIONS_DB.length} Core Monographs
-                </span>
-              </div>
-              <p className="text-slate-500 dark:text-slate-400 text-xs sm:text-sm mt-0.5 leading-relaxed">
-                {lang === "ar"
-                  ? "مربوط بمرجع Stockley’s Drug Interactions (المعرف: 1eg07NXxWYgJq0NxLf0Vim1JlV7KTu16S) لفحص التداخلات الاستقلابية (CYP450 / P-gp)، تطاول QTc، والحساسية المتصالبة، وتعديل الجرعات الكلوية."
-                  : "Grounded in Stockley’s Drug Interactions (Drive ID: 1eg07NXxWYgJq0NxLf0Vim1JlV7KTu16S) for CYP450/P-gp interactions, QTc prolongation, IgE cross-reactivity, and renal dosing."}
-              </p>
-            </div>
-          </div>
-
-          {/* Direct Actions for Stockley's Drug Interactions Reference */}
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
-            {onOpenLocalReference && (
-              <button
-                type="button"
-                onClick={() => onOpenLocalReference("local://ref/source/stockleys-drug-interactions")}
-                className="min-h-[40px] px-3.5 py-2 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold flex items-center gap-1.5 transition shadow-xs cursor-pointer"
-              >
-                <BookOpen className="w-4 h-4" />
-                <span>
-                  {lang === "ar"
-                    ? "فتح فصول Stockley’s داخل التطبيق"
-                    : "Open Stockley’s In-App Monograph"}
-                </span>
-              </button>
-            )}
-            <a
-              href={STOCKLEYS_DRIVE_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="min-h-[40px] px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-bold flex items-center gap-1.5 transition"
-            >
-              <ExternalLink className="w-3.5 h-3.5 text-teal-600" />
-              <span dir="ltr">Google Drive PDF ({STOCKLEYS_DRIVE_ID.slice(0, 8)}...)</span>
-            </a>
-          </div>
-        </div>
-      </div>
+      <AlertWorkspaceHeader
+        lang={lang}
+        patientCount={patients.length}
+        totalAlerts={totalAlertsCount}
+        criticalCount={safetyAnalysis?.criticalAlerts.length || 0}
+        interactionCount={safetyAnalysis?.interactions.length || 0}
+        renalAdjustmentCount={safetyAnalysis?.renalAdjustments.length || 0}
+        databaseCount={DRUG_INTERACTIONS_DB.length}
+        onOpenLocalReference={onOpenLocalReference ? () => onOpenLocalReference("local://ref/source/stockleys-drug-interactions") : undefined}
+      />
 
       {/* Patient-Specific Automated Safety Scanner */}
       <div className="bg-white dark:bg-slate-900 p-4 sm:p-6 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs">
@@ -336,23 +291,11 @@ export function AlertsPanel({
                   : `Active Clinical Safety Alerts (${totalAlertsCount})`}
               </h4>
 
-              {safetyAnalysis.allergyWarnings.map((aw, idx) => (
-                <div key={`aw-${idx}`} className="p-3.5 sm:p-4 rounded-xl border bg-rose-50/70 dark:bg-rose-950/30 border-rose-200 dark:border-rose-900/50 text-xs sm:text-sm font-bold text-rose-800 dark:text-rose-200 leading-relaxed">
-                  {aw}
-                </div>
-              ))}
+              {safetyAnalysis.allergyWarnings.map((aw, idx) => <ClinicalAlert key={`aw-${idx}`} tone="danger" heading={lang === "ar" ? "تحذير حساسية" : "Allergy warning"}>{aw}</ClinicalAlert>)}
 
-              {safetyAnalysis.criticalAlerts.map((ca, idx) => (
-                <div key={`ca-${idx}`} className="p-3.5 sm:p-4 rounded-xl border bg-rose-50/60 dark:bg-rose-950/20 border-rose-200 dark:border-rose-900/50 text-xs sm:text-sm font-semibold text-rose-800 dark:text-rose-200 leading-relaxed">
-                  {ca}
-                </div>
-              ))}
+              {safetyAnalysis.criticalAlerts.map((ca, idx) => <ClinicalAlert key={`ca-${idx}`} tone="danger" heading={lang === "ar" ? "تنبيه حرج" : "Critical alert"}>{ca}</ClinicalAlert>)}
 
-              {safetyAnalysis.warnings.map((w, idx) => (
-                <div key={`w-${idx}`} className="p-3.5 sm:p-4 rounded-xl border bg-amber-50/60 dark:bg-amber-950/20 border-amber-200 dark:border-amber-900/50 text-xs sm:text-sm font-medium text-amber-900 dark:text-amber-200 leading-relaxed">
-                  {w}
-                </div>
-              ))}
+              {safetyAnalysis.warnings.map((w, idx) => <ClinicalAlert key={`w-${idx}`} tone="warning" heading={lang === "ar" ? "تحذير سريري" : "Clinical warning"}>{w}</ClinicalAlert>)}
 
               {safetyAnalysis.interactions.map((ddi) => (
                 <div
@@ -365,13 +308,7 @@ export function AlertsPanel({
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5" dir="ltr">
                     <div className="flex items-center gap-1.5">
-                      <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md ${
-                        ddi.severity === "Contraindicated" || ddi.severity === "Major"
-                          ? "bg-rose-600 text-white"
-                          : "bg-amber-500 text-white"
-                      }`}>
-                        Stockley DDI • {ddi.severity}
-                      </span>
+                        <ClinicalBadge tone={ddi.severity === "Contraindicated" || ddi.severity === "Major" ? "critical" : "review"}>Stockley DDI · {ddi.severity}</ClinicalBadge>
                       {ddi.stockleyRating && (
                         <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-white/80 dark:bg-slate-900/80 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
                           {ddi.stockleyRating}
