@@ -30,7 +30,6 @@ import {
   FileDown,
   Copy,
   Check,
-  Sparkles,
   ChevronRight,
   List,
   SlidersHorizontal,
@@ -40,18 +39,15 @@ import {
   Maximize2,
   Minimize2,
   Type,
-  ExternalLink,
-  BookMarked,
   CloudDownload,
   FileText,
-  Printer,
-  Share2,
   Columns2,
   Network
 } from 'lucide-react';
 import { printOrSaveClinicalPdf, shareClinicalFile } from '../../lib/androidPermissions';
 import { resolveKnowledgeGraphUri } from '../../lib/knowledgeGraph/prototypeRepository';
 import { ClinicalEncyclopediaPage } from '../clinical-encyclopedia/ClinicalEncyclopediaPage';
+import { LibraryWorkspaceHeader } from './LibraryWorkspaceHeader';
 
 interface Props {
   lang: Language;
@@ -244,90 +240,17 @@ export function ClinicalLibraryViewer({
 
   return (
     <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs">
-      {/* Reference collection banner; provenance is shown per record, not implied by this collection. */}
-      <div className="bg-gradient-to-r from-teal-900 via-slate-900 to-indigo-950 text-white px-4 py-3 sm:px-6 flex flex-wrap items-center justify-between gap-3 border-b border-teal-800/40">
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="w-9 h-9 rounded-xl bg-teal-500/20 border border-teal-400/30 flex items-center justify-center text-teal-300 shrink-0">
-            <BookMarked className="w-5 h-5" />
-          </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h2 className="font-extrabold text-sm sm:text-base tracking-tight truncate">
-                {lang === 'ar' ? 'مجموعة المراجع السريرية داخل التطبيق' : 'In-App Clinical Reference Collection'}
-              </h2>
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
-                <BookOpen className="w-3 h-3" />
-                {lang === 'ar'
-                  ? `${books.length} مراجع • ${allChapters.length} سجل فصل؛ تُعرض طبقة المصدر عند توفرها`
-                  : `${books.length} references • ${allChapters.length} chapter records; source layer shown when available`}
-              </span>
-            </div>
-            <p className="text-[11px] text-teal-200/80 truncate">
-              {lang === 'ar'
-                ? 'DiPiro 13th Ed • ACCP Cardiology 2026 • ACCP Updates Vol 1 & Vol 2 (Ch. 1–22) • PPCP Casebook • Hospital Compendium'
-                : 'DiPiro 13th Ed • ACCP Cardiology 2026 • ACCP Updates Vol 1 & Vol 2 (Ch. 1–22) • PPCP Casebook • Hospital Compendium'}
-            </p>
-          </div>
-        </div>
-
-        {/* Action Shortcuts */}
-        <div className="flex items-center gap-2 shrink-0 flex-wrap">
-          <button
-            type="button"
-            onClick={() => setDriveSyncModalOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 border border-emerald-400/40 text-xs font-bold transition cursor-pointer"
-            title="Import PDF references and index their available pages"
-          >
-            <CloudDownload className="w-3.5 h-3.5 text-emerald-300" />
-            <span>
-              {lang === 'ar'
-                ? 'استيراد مراجع PDF من Google Drive'
-                : 'Import PDF references'}
-            </span>
-          </button>
-          <button
-            type="button"
-            onClick={handleAskCopilotCurrentChapter}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-400/30 text-xs font-bold transition cursor-pointer"
-            title="Ask Copilot about this chapter"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-            <span className="hidden sm:inline">
-              {lang === 'ar' ? 'استشارة المساعد الذكي (AI)' : 'Ask Real AI Copilot'}
-            </span>
-          </button>
-          <button
-            type="button"
-            onClick={handlePrintChapterPdf}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600/40 hover:bg-indigo-600/60 text-indigo-100 border border-indigo-400/40 text-xs font-bold transition cursor-pointer"
-            title="Print or Save Chapter as PDF"
-          >
-            <Printer className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">
-              {lang === 'ar' ? 'طباعة / PDF' : 'Print / PDF'}
-            </span>
-          </button>
-          <button
-            type="button"
-            onClick={handleShareChapter}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-teal-700/50 hover:bg-teal-700 text-teal-100 border border-teal-500/30 text-xs font-bold transition cursor-pointer"
-            title="Share or Export Chapter File"
-          >
-            <Share2 className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">
-              {lang === 'ar' ? 'مشاركة / تصدير' : 'Share / Export'}
-            </span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setMobileTocOpen(!mobileTocOpen)}
-            className="lg:hidden p-2 rounded-xl bg-slate-800 text-slate-200 hover:bg-slate-700"
-            aria-label="Toggle Table of Contents"
-          >
-            <List className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
+      <LibraryWorkspaceHeader
+        lang={lang}
+        bookCount={books.length}
+        chapterCount={allChapters.length}
+        activeBookTitle={lang === 'ar' ? activeBook.titleAr : activeBook.title}
+        onImport={() => setDriveSyncModalOpen(true)}
+        onAsk={handleAskCopilotCurrentChapter}
+        onPrint={handlePrintChapterPdf}
+        onShare={handleShareChapter}
+        onToggleToc={() => setMobileTocOpen(value => !value)}
+      />
 
       {/* Switch between topic records and reference-book records. */}
       <div className="bg-slate-900 text-slate-200 px-4 py-2 sm:px-6 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2">

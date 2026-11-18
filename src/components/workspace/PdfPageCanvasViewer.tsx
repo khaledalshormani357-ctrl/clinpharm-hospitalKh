@@ -9,17 +9,11 @@ import {
   formatStorageBytes
 } from '../../lib/googleDrive/pdfOfflineStorageService';
 import {
-  ChevronLeft,
-  ChevronRight,
-  ZoomIn,
-  ZoomOut,
-  FileText,
-  Download,
-  HardDrive,
   ShieldCheck,
   CloudDownload
 } from 'lucide-react';
 import { Language } from '../../types/clinical';
+import { PdfReaderToolbar } from './PdfReaderToolbar';
 
 interface Props {
   bookId: string;
@@ -232,93 +226,28 @@ export function PdfPageCanvasViewer({
 
   return (
     <div className="flex flex-col rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-900 overflow-hidden">
-      {/* Toolbar */}
-      <div className="px-4 py-2.5 bg-slate-800 text-slate-100 border-b border-slate-700 flex flex-wrap items-center justify-between gap-3 text-xs">
-        <div className="flex items-center gap-2">
-          <FileText className="w-4 h-4 text-teal-400" />
-          <span className="font-bold">
-            {lang === 'ar'
-              ? 'عارض صفحات الكتاب المرجعي الأصلي (محفوظ محلياً في IndexedDB بدون إنترنت)'
-              : 'Original Reference Page Viewer (Cached Offline in IndexedDB)'}
-          </span>
-          {cachedByteSize > 0 && (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-mono text-[10px]">
-              <HardDrive className="w-3 h-3" />
-              <span>{formatStorageBytes(cachedByteSize)}</span>
-            </span>
-          )}
-        </div>
-
-        {/* Page Navigation */}
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            disabled={currentPage <= 1}
-            onClick={() => goToPage(currentPage - 1)}
-            className="p-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 disabled:opacity-40 cursor-pointer"
-          >
-            <ChevronLeft className="w-4 h-4" />
-          </button>
-
-          <form
-            onSubmit={e => {
-              e.preventDefault();
-              const parsed = parseInt(pageInput, 10);
-              if (!isNaN(parsed)) goToPage(parsed);
-            }}
-            className="flex items-center gap-1.5 font-mono"
-          >
-            <span>{lang === 'ar' ? 'صفحة' : 'Page'}</span>
-            <input
-              type="text"
-              value={pageInput}
-              onChange={e => setPageInput(e.target.value)}
-              className="w-16 px-2 py-1 text-center rounded-md bg-slate-900 border border-slate-600 text-white font-bold text-xs"
-            />
-            <span>/ {totalPages}</span>
-          </form>
-
-          <button
-            type="button"
-            disabled={currentPage >= totalPages}
-            onClick={() => goToPage(currentPage + 1)}
-            className="p-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 disabled:opacity-40 cursor-pointer"
-          >
-            <ChevronRight className="w-4 h-4" />
-          </button>
-        </div>
-
-        {/* Zoom Controls + Direct Offline PDF Download */}
-        <div className="flex items-center gap-1.5 font-mono">
-          <button
-            type="button"
-            onClick={() => setScale(s => Math.max(0.75, +(s - 0.2).toFixed(2)))}
-            className="p-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 cursor-pointer"
-            title="Zoom Out"
-          >
-            <ZoomOut className="w-3.5 h-3.5" />
-          </button>
-          <span className="px-2">{Math.round(scale * 100)}%</span>
-          <button
-            type="button"
-            onClick={() => setScale(s => Math.min(2.6, +(s + 0.2).toFixed(2)))}
-            className="p-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 cursor-pointer"
-            title="Zoom In"
-          >
-            <ZoomIn className="w-3.5 h-3.5" />
-          </button>
-
-          <button
-            type="button"
-            onClick={() => void downloadOfflinePdfFromVault(bookId)}
-            className="ml-1 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-500 text-white font-sans font-bold text-[11px] cursor-pointer"
-            title="Download full reference from IndexedDB offline storage"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span>{lang === 'ar' ? 'تنزيل المرجع' : 'Save PDF'}</span>
-          </button>
-        </div>
-      </div>
+      <PdfReaderToolbar
+        lang={lang}
+        currentPage={currentPage}
+        totalPages={totalPages}
+        pageInput={pageInput}
+        scale={scale}
+        cachedByteSize={cachedByteSize}
+        hasBinaryCanvas={hasBinaryCanvas}
+        isFetchingBinary={isFetchingBinary}
+        hasDriveFile={Boolean(syncedRecord?.driveFileId)}
+        onPageInput={setPageInput}
+        onSubmitPage={() => {
+          const parsed = parseInt(pageInput, 10);
+          if (!isNaN(parsed)) goToPage(parsed);
+        }}
+        onPrevious={() => goToPage(currentPage - 1)}
+        onNext={() => goToPage(currentPage + 1)}
+        onZoomOut={() => setScale(value => Math.max(0.75, +(value - 0.2).toFixed(2)))}
+        onZoomIn={() => setScale(value => Math.min(2.6, +(value + 0.2).toFixed(2)))}
+        onDownload={() => void downloadOfflinePdfFromVault(bookId)}
+        onFetchBinary={() => void handleLoadBinaryPdfOnDemand()}
+      />
 
       {/* PDF canvas or indexed page-text fallback. */}
       <div className="p-4 overflow-auto max-h-[75vh] flex flex-col items-center justify-start bg-slate-950/90 min-h-[420px]">
