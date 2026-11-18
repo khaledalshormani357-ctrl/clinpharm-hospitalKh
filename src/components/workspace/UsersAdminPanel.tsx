@@ -28,6 +28,7 @@ import {
 import { BookSyncProgress } from '../../lib/googleDrive/fullBookEngine';
 import { ensureAllCoreBooksPreloadedOffline } from '../../lib/googleDrive/embeddedBookCompiler';
 import { printOrSaveClinicalPdf, shareClinicalFile } from '../../lib/androidPermissions';
+import { AdminWorkspaceHeader } from './AdminWorkspaceHeader';
 import {
   ShieldCheck,
   UserCheck,
@@ -238,209 +239,20 @@ export function UsersAdminPanel({
 
   return (
     <div className="space-y-6">
-      {/* 1. Executive System Administrator Header Card — د. خالد الشرماني */}
-      <div className="bg-gradient-to-br from-slate-900 via-teal-950 to-slate-900 text-white rounded-3xl p-5 sm:p-7 shadow-xl border border-teal-500/40 relative overflow-hidden">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-          <div className="flex items-start gap-4">
-            <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-gradient-to-tr from-amber-500 via-teal-500 to-emerald-400 p-0.5 shadow-lg shrink-0">
-              <div className="w-full h-full bg-slate-950 rounded-[14px] flex flex-col items-center justify-center text-amber-300">
-                <Crown className="w-7 h-7 sm:w-8 sm:h-8 text-amber-400" />
-                <span className="text-[9px] font-mono font-extrabold uppercase tracking-wider mt-0.5 text-teal-300">
-                  SYS-ADMIN
-                </span>
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/20 text-amber-300 border border-amber-400/40 text-xs font-extrabold">
-                  <Crown className="w-3.5 h-3.5" />
-                  <span>
-                    {lang === 'ar'
-                      ? 'مدير النظام العام (System Administrator)'
-                      : 'Primary System Administrator'}
-                  </span>
-                </span>
-                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 text-[11px] font-mono font-bold">
-                  <ShieldCheck className="w-3.5 h-3.5" />
-                  <span>{primaryAdmin.licenseBadge}</span>
-                </span>
-              </div>
-
-              <h2 className="text-xl sm:text-2xl font-black tracking-tight text-white">
-                {lang === 'ar'
-                  ? 'مدير النظام: د. خالد الشرماني (Dr. Khaled Al-Shormani)'
-                  : 'System Administrator: Dr. Khaled Al-Shormani (د. خالد الشرماني)'}
-              </h2>
-
-              <p className="text-xs sm:text-sm text-teal-200 font-semibold">
-                {lang === 'ar' ? primaryAdmin.titleAr : primaryAdmin.titleEn}
-              </p>
-
-              <div className="flex flex-wrap items-center gap-4 text-xs text-slate-300 pt-1">
-                <span className="inline-flex items-center gap-1.5 font-mono">
-                  <Mail className="w-3.5 h-3.5 text-teal-400" />
-                  <span>{primaryAdmin.email}</span>
-                </span>
-                <span className="inline-flex items-center gap-1.5 font-mono" dir="ltr">
-                  <Phone className="w-3.5 h-3.5 text-teal-400" />
-                  <span>{primaryAdmin.phone}</span>
-                </span>
-                <span className="inline-flex items-center gap-1.5">
-                  <Building2 className="w-3.5 h-3.5 text-amber-400" />
-                  <span>{primaryAdmin.departmentWard}</span>
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Admin Quick Command Actions */}
-          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
-            <button
-              type="button"
-              onClick={() => void handleRebuildAllOfflineBooks()}
-              disabled={Boolean(bookProgress)}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-extrabold text-xs shadow-md transition cursor-pointer"
-            >
-              <RefreshCw
-                className={`w-4 h-4 ${bookProgress ? 'animate-spin' : ''}`}
-              />
-              <span>
-                {lang === 'ar'
-                  ? 'تفعيل وتوليد جميع المراجع الـ 7 الكاملة (بدون إنترنت 100%)'
-                  : 'Rebuild & Verify All 7 Full Books Offline'}
-              </span>
-            </button>
-
-            <button
-              type="button"
-              onClick={handlePrintUsersReportPdf}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/15 text-xs font-bold transition cursor-pointer"
-            >
-              <Printer className="w-4 h-4 text-amber-300" />
-              <span>
-                {lang === 'ar' ? 'طباعة تقرير المستخدمين PDF' : 'Print Users PDF'}
-              </span>
-            </button>
-
-            <button
-              type="button"
-              onClick={handleShareUsersReport}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/15 text-xs font-bold transition cursor-pointer"
-            >
-              <Share2 className="w-4 h-4 text-teal-300" />
-              <span>{lang === 'ar' ? 'مشاركة التقرير' : 'Share Report'}</span>
-            </button>
-
-            {onOpenAndroidPermissions && (
-              <button
-                type="button"
-                onClick={onOpenAndroidPermissions}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-teal-900/80 hover:bg-teal-800 text-emerald-200 border border-teal-600/50 text-xs font-bold transition cursor-pointer"
-              >
-                <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                <span>
-                  {lang === 'ar' ? 'أذونات الأندرويد' : 'Android Permissions'}
-                </span>
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Live Progress or Status Banner */}
-        {bookProgress && (
-          <div className="mt-4 p-3 rounded-xl bg-teal-950/90 border border-teal-700 text-xs flex items-center justify-between gap-3">
-            <span className="flex items-center gap-2 font-bold text-teal-200">
-              <RefreshCw className="w-4 h-4 animate-spin text-teal-400" />
-              <span>{bookProgress.message}</span>
-            </span>
-            <span className="font-mono text-amber-300">
-              {bookProgress.currentPage} / {bookProgress.totalPages} pp
-            </span>
-          </div>
-        )}
-
-        {statusBanner && (
-          <div className="mt-4 p-3.5 rounded-xl bg-emerald-500/20 border border-emerald-400/40 text-emerald-100 text-xs font-bold flex items-center justify-between gap-3">
-            <span className="flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-300 shrink-0" />
-              <span>{statusBanner}</span>
-            </span>
-            <button
-              type="button"
-              onClick={() => setStatusBanner(null)}
-              className="text-emerald-200 hover:text-white text-xs font-bold px-2"
-            >
-              ✕
-            </button>
-          </div>
-        )}
-
-        {/* Executive KPIs Bar */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5 pt-5 border-t border-white/10 text-xs">
-          <div className="p-3 rounded-2xl bg-white/5 border border-white/10">
-            <span className="text-slate-400 block text-[11px]">
-              {lang === 'ar'
-                ? 'المستخدم النشط حالياً في الجلسة'
-                : 'Current Active Session User'}
-            </span>
-            <span className="font-extrabold text-sm text-amber-300 mt-0.5 block truncate">
-              {lang === 'ar' ? activeUser.nameAr : activeUser.nameEn}
-            </span>
-            <span className="text-[10px] text-teal-300">
-              {lang === 'ar'
-                ? ROLE_LABELS[activeUser.role].labelAr
-                : ROLE_LABELS[activeUser.role].labelEn}
-            </span>
-          </div>
-
-          <div className="p-3 rounded-2xl bg-white/5 border border-white/10">
-            <span className="text-slate-400 block text-[11px]">
-              {lang === 'ar' ? 'إجمالي الكادر الطبي المسجل' : 'Total Registered Clinicians'}
-            </span>
-            <span className="font-mono font-black text-lg text-white mt-0.5 block">
-              {users.length}{' '}
-              <span className="text-xs font-normal text-emerald-300">
-                ({users.filter(u => u.status !== 'suspended').length}{' '}
-                {lang === 'ar' ? 'نشط' : 'Active'})
-              </span>
-            </span>
-          </div>
-
-          <div className="p-3 rounded-2xl bg-white/5 border border-white/10">
-            <span className="text-slate-400 block text-[11px]">
-              {lang === 'ar'
-                ? 'المراجع الطبية الكاملة المرفوعة بالبرنامج'
-                : 'In-App Full Reference Books'}
-            </span>
-            <span className="font-mono font-black text-lg text-emerald-300 mt-0.5 block">
-              {vaultDiag ? vaultDiag.totalBooksCached : 7} / 7{' '}
-              <span className="text-xs font-normal text-teal-200">
-                ({vaultDiag ? vaultDiag.totalPagesCached : 210}{' '}
-                {lang === 'ar' ? 'صفحة جاهزة' : 'Pages Ready'})
-              </span>
-            </span>
-          </div>
-
-          <div className="p-3 rounded-2xl bg-white/5 border border-white/10">
-            <span className="text-slate-400 block text-[11px]">
-              {lang === 'ar'
-                ? 'حالة خزنة الـ PDF بدون إنترنت (IndexedDB)'
-                : 'Offline PDF Vault Status'}
-            </span>
-            <span className="font-mono font-bold text-sm text-sky-300 mt-0.5 block">
-              {vaultDiag
-                ? `${vaultDiag.totalBinaryPdfsCached} PDF (${formatStorageBytes(
-                    vaultDiag.totalVaultBytes
-                  )})`
-                : '100% Preloaded Offline'}
-            </span>
-            <span className="text-[10px] text-emerald-300">
-              {lang === 'ar' ? '✓ جميع الكتب تعمل بدون إنترنت' : '✓ 100% Offline Ready'}
-            </span>
-          </div>
-        </div>
-      </div>
+      <AdminWorkspaceHeader
+        lang={lang}
+        primaryAdmin={primaryAdmin}
+        activeUser={activeUser}
+        users={users}
+        vaultDiag={vaultDiag}
+        bookProgress={bookProgress}
+        statusBanner={statusBanner}
+        onRebuildBooks={() => void handleRebuildAllOfflineBooks()}
+        onPrint={handlePrintUsersReportPdf}
+        onShare={handleShareUsersReport}
+        onOpenPermissions={onOpenAndroidPermissions}
+        onDismissStatus={() => setStatusBanner(null)}
+      />
 
       {/* 2. Embedded Full Reference Library Status Strip (Direct PDF Download & Open) */}
       <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 sm:p-5 border border-slate-200 dark:border-slate-800 shadow-xs space-y-3">
