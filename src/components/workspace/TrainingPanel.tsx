@@ -38,6 +38,7 @@ import {
   type AppBenchmarkTestCase
 } from '../../lib/caseTakingGuide';
 import { Language } from '../../types/clinical';
+import { TrainingWorkspaceHeader } from './TrainingWorkspaceHeader';
 
 interface TrainingPanelProps {
   lang: Language;
@@ -129,134 +130,33 @@ export function TrainingPanel({
     }
   };
 
+  const handleExportCasebook = () => {
+    const resolved = resolveLocalReference(CASEBOOK_DRIVE_URL);
+    const md = exportLocalReferenceMarkdown(resolved.chapter, lang);
+    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `clinpharm-local-ref-${resolved.chapter.id}.md`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="space-y-4 sm:space-y-6">
-      {/* Top Banner: Reference Guide & Academy Hub */}
-      <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-teal-950 text-white p-4 sm:p-6 rounded-2xl sm:rounded-3xl border border-teal-500/30 shadow-lg">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div className="flex items-start gap-3.5">
-            <div className="bg-teal-500/20 p-3 rounded-2xl text-teal-300 border border-teal-400/30 shrink-0">
-              <GraduationCap className="h-6 w-6" />
-            </div>
-            <div>
-              <div className="flex flex-wrap items-center gap-2 mb-1">
-                <span className="text-[11px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/30">
-                  {lang === 'ar' ? 'مرجع معتمد للصيدلي السريري والطالب' : 'Accredited Clinical Casebook & PPCP Guide'}
-                </span>
-                <span dir="ltr" className="text-[11px] font-mono text-teal-300/90">
-                  Local DB: {CASEBOOK_DRIVE_URL}
-                </span>
-              </div>
-              <h2 className="text-base sm:text-xl font-black text-white leading-snug">
-                {lang === 'ar'
-                  ? 'دليل أخذ الحالات السريرية والتعامل معها، وحالات التدريب والاختبار التفاعلي (PPCP & Clinical Casebook)'
-                  : 'Clinical Pharmacist & Student Case-Taking Guide, OSCE Training & Live App Test Cases'}
-              </h2>
-              <p className="text-slate-300 text-xs sm:text-sm mt-1 leading-relaxed">
-                {lang === 'ar'
-                  ? 'قاعدة بيانات مرجعية محلية متكاملة داخل التطبيق: تستخرج كل التعليمات المنهجية في كيفية أخذ الحالة السريرية (CC, HPI, BPMH, DRPs, SOAP)، وأهم المعلومات المطلوبة في كل مرض، مع حالات تدريبية للطلاب وحالات اختبار حية للتطبيق دون الحاجة إلى Google Drive.'
-                  : 'Embedded local reference database: complete methodology for bedside case-taking, syndrome-specific must-gather checklists, student OSCE training vignettes, and live application benchmark test cases.'}
-              </p>
-            </div>
-          </div>
-
-          {/* Direct Local Database Actions */}
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
-            <button
-              type="button"
-              onClick={() => onOpenLocalReference?.(CASEBOOK_DRIVE_URL)}
-              className="flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold border border-white/15 transition cursor-pointer"
-            >
-              <Database className="w-3.5 h-3.5 text-teal-300" />
-              <span>{lang === 'ar' ? 'فتح الدليل محلياً (Local DB)' : 'Open in Local DB'}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                const resolved = resolveLocalReference(CASEBOOK_DRIVE_URL);
-                const md = exportLocalReferenceMarkdown(resolved.chapter, lang);
-                const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `clinpharm-local-ref-${resolved.chapter.id}.md`;
-                a.click();
-                URL.revokeObjectURL(url);
-              }}
-              className="flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold transition shadow-xs cursor-pointer"
-            >
-              <FileDown className="w-3.5 h-3.5" />
-              <span>{lang === 'ar' ? 'تصدير الدليل (.md)' : 'Export Local (.md)'}</span>
-            </button>
-          </div>
-        </div>
-
-        {/* 3-Mode Segmented Switcher (Mobile-First Horizontal Scroll) */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-4 pt-4 border-t border-white/10">
-          <button
-            onClick={() => setActiveMode('guide')}
-            className={`flex items-center justify-between gap-2 p-3 rounded-xl text-xs sm:text-sm font-extrabold transition cursor-pointer border ${
-              activeMode === 'guide'
-                ? 'bg-teal-500 text-slate-950 border-teal-400 shadow-md'
-                : 'bg-white/5 text-slate-200 border-white/10 hover:bg-white/10'
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <ListChecks className="w-4 h-4 shrink-0" />
-              <span>
-                {lang === 'ar'
-                  ? '1. كيفية أخذ الحالة وأهم المعلومات (Case-Taking Guide)'
-                  : '1. How to Take a Case & Checklists'}
-              </span>
-            </div>
-            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-black/20">
-              {DISEASE_CASE_CHECKLISTS.length} Syndromes
-            </span>
-          </button>
-
-          <button
-            onClick={() => setActiveMode('training')}
-            className={`flex items-center justify-between gap-2 p-3 rounded-xl text-xs sm:text-sm font-extrabold transition cursor-pointer border ${
-              activeMode === 'training'
-                ? 'bg-amber-400 text-slate-950 border-amber-300 shadow-md'
-                : 'bg-white/5 text-slate-200 border-white/10 hover:bg-white/10'
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <GraduationCap className="w-4 h-4 shrink-0" />
-              <span>
-                {lang === 'ar'
-                  ? '2. حالات تدريبية للطلاب (Student OSCE Cases)'
-                  : '2. Student Training Cases'}
-              </span>
-            </div>
-            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-black/20" dir="ltr">
-              {correctCount}/{CLINICAL_CASES.length}
-            </span>
-          </button>
-
-          <button
-            onClick={() => setActiveMode('testcases')}
-            className={`flex items-center justify-between gap-2 p-3 rounded-xl text-xs sm:text-sm font-extrabold transition cursor-pointer border ${
-              activeMode === 'testcases'
-                ? 'bg-emerald-400 text-slate-950 border-emerald-300 shadow-md'
-                : 'bg-white/5 text-slate-200 border-white/10 hover:bg-white/10'
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <FlaskConical className="w-4 h-4 shrink-0" />
-              <span>
-                {lang === 'ar'
-                  ? '3. حالات اختبار التطبيق الحية (App Test Cases)'
-                  : '3. Live App Test Cases'}
-              </span>
-            </div>
-            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-black/20">
-              {BENCHMARK_APP_TEST_CASES.length} Live Tests
-            </span>
-          </button>
-        </div>
-      </div>
+      <TrainingWorkspaceHeader
+        lang={lang}
+        activeMode={activeMode}
+        onModeChange={setActiveMode}
+        syndromeCount={DISEASE_CASE_CHECKLISTS.length}
+        caseCount={CLINICAL_CASES.length}
+        completedCount={correctCount}
+        testCaseCount={BENCHMARK_APP_TEST_CASES.length}
+        onOpenReference={() => onOpenLocalReference?.(CASEBOOK_DRIVE_URL)}
+        onExportReference={handleExportCasebook}
+      />
 
       {/* =====================================================================
           MODE 1: HOW TO TAKE A CLINICAL CASE & ESSENTIAL INFORMATION CHECKLISTS
