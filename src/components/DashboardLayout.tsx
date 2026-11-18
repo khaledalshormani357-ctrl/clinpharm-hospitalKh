@@ -95,6 +95,11 @@ export function DashboardLayout({
   const [activeHospitalUser, setActiveHospitalUserState] = useState<HospitalUser>(() => getActiveHospitalUser());
 
   useEffect(() => {
+    document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
+    document.documentElement.lang = lang;
+  }, [lang]);
+
+  useEffect(() => {
     void hydrateSyncedFullBooks();
     const unsub = subscribeHospitalUsers(() => {
       setActiveHospitalUserState(getActiveHospitalUser());
