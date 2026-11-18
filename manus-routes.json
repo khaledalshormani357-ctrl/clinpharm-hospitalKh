@@ -1,0 +1,16 @@
+{
+  "routes": [
+    { "path": "/", "title": "ClinPharm Hospital" },
+    { "path": "/#/patients", "title": "Patients and rounds" },
+    { "path": "/#/reconciliation", "title": "Medication reconciliation" },
+    { "path": "/#/calculators", "title": "Clinical calculators" },
+    { "path": "/#/alerts", "title": "Safety and alerts" },
+    { "path": "/#/interventions", "title": "Interventions and SOAP" },
+    { "path": "/#/guidelines", "title": "Guidelines and references" },
+    { "path": "/#/encyclopedia", "title": "Clinical encyclopedia" },
+    { "path": "/#/encyclopedia/:slug", "title": "Clinical topic" },
+    { "path": "/#/encyclopedia/:slug/section/:sectionKey", "title": "Clinical topic section" },
+    { "path": "/#/training", "title": "Clinical training and cases" },
+    { "path": "/#/users-admin", "title": "User administration" }
+  ]
+}
