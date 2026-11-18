@@ -22,8 +22,8 @@ import {
   CorticosteroidName
 } from '../../lib/dynamedexAndPedsCalculators';
 import { printOrSaveClinicalPdf } from '../../lib/androidPermissions';
+import { CalculatorWorkspaceHeader } from './CalculatorWorkspaceHeader';
 import {
-  Calculator,
   Activity,
   Heart,
   ShieldAlert,
@@ -35,7 +35,6 @@ import {
   Flame,
   Scale,
   Zap,
-  Printer,
   CheckCircle2,
   AlertTriangle
 } from 'lucide-react';
@@ -443,132 +442,15 @@ export function CalculatorsPanel({ lang }: Props) {
 
   return (
     <div className="space-y-5 sm:space-y-6">
-      {/* Header Banner */}
-      <div className="bg-gradient-to-r from-cyan-900 via-teal-900 to-slate-900 text-white rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-xl border border-teal-500/30">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 sm:p-3 bg-teal-500/20 text-teal-300 rounded-xl border border-teal-400/30 shrink-0">
-              <Calculator className="w-5 h-5 sm:w-6 sm:h-6" />
-            </div>
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-lg sm:text-2xl font-black">
-                  {lang === 'ar'
-                    ? 'موسوعة الحاسبات الطبية: جرعات الأطفال + حاسبات DynaMedex & PK/TDM'
-                    : 'Comprehensive Pediatric Drug Dosing & DynaMedex Clinical Calculators'}
-                </h2>
-                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
-                  {lang === 'ar'
-                    ? '15 حاسبة تخصصية + 14 دواء أطفال'
-                    : '15 Calculators + 14 Peds Drugs'}
-                </span>
-              </div>
-              <p className="text-teal-100/80 text-xs mt-1">
-                {lang === 'ar'
-                  ? 'يشمل حاسبات جرعات أدوية الأطفال بالمليغرام والمليلتر (Harriet Lane / BNFc)، سوائل Holliday-Segar، معادلة Schwartz، وجميع حاسبات موقع DynaMedex المعتمدة.'
-                  : 'Complete pediatric weight-based suspension/IV dosing (mg & mL), Holliday-Segar fluids, Schwartz eGFR, PALS resuscitation, and DynaMedex clinical calculators.'}
-              </p>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={handlePrintCurrentCalculations}
-            className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/20 text-xs font-bold transition cursor-pointer shrink-0"
-          >
-            <Printer className="w-4 h-4 text-teal-300" />
-            <span>
-              {lang === 'ar' ? 'طباعة / حفظ التقرير PDF' : 'Print / Save PDF'}
-            </span>
-          </button>
-        </div>
-
-        {/* Category Suite Filter Pills */}
-        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pt-4 mt-4 border-t border-white/10 text-xs">
-          {(
-            [
-              {
-                key: 'all',
-                ar: 'جميع الحاسبات (All 15 Calculators)',
-                en: 'All Calculators (15)'
-              },
-              {
-                key: 'pediatrics',
-                ar: 'حاسبات جرعات وسوائل وإنعاش الأطفال (Pediatrics & PALS)',
-                en: 'Pediatric Drug Dosing, Fluids & PALS'
-              },
-              {
-                key: 'pk_renal_electrolytes',
-                ar: 'الكلى والشوارد و TDM (DynaMedex Renal/Electrolytes/PK)',
-                en: 'DynaMedex Renal, Electrolytes & TDM'
-              },
-              {
-                key: 'cardio_icu_hepatic',
-                ar: 'القلب والعناية المركزة والكبد (DynaMedex Cardio/ICU/Liver)',
-                en: 'DynaMedex Cardio, ICU & Hepatology'
-              },
-              {
-                key: 'converters',
-                ar: 'محولات الستيرويدات والأفيونات (Drug Converters)',
-                en: 'Steroid & Opioid Converters'
-              }
-            ] as const
-          ).map(cat => (
-            <button
-              key={cat.key}
-              type="button"
-              onClick={() => {
-                setCategoryFilter(cat.key);
-                const firstInCat = calculatorTabs.find(
-                  t => cat.key === 'all' || t.category === cat.key
-                );
-                if (firstInCat) setActiveTab(firstInCat.id);
-              }}
-              className={`px-3 py-1.5 rounded-xl font-bold whitespace-nowrap transition cursor-pointer ${
-                categoryFilter === cat.key
-                  ? 'bg-amber-400 text-slate-950 shadow-xs'
-                  : 'bg-white/10 text-teal-100 hover:bg-white/20'
-              }`}
-            >
-              {lang === 'ar' ? cat.ar : cat.en}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Horizontally Scrollable Calculator Tabs */}
-      <div className="flex overflow-x-auto no-scrollbar gap-2 border-b border-slate-200 dark:border-slate-800 pb-2.5 -mx-1 px-1">
-        {visibleTabs.map(tab => {
-          const IconComponent = tab.icon;
-          const isSelected = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 min-h-[42px] px-3.5 py-2 rounded-xl font-bold text-xs whitespace-nowrap transition cursor-pointer ${
-                isSelected
-                  ? 'bg-teal-600 text-white shadow-sm'
-                  : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-100'
-              }`}
-            >
-              <IconComponent className="w-4 h-4 shrink-0" />
-              <span>{lang === 'ar' ? tab.labelAr : tab.labelEn}</span>
-              {tab.badge && (
-                <span
-                  className={`px-1.5 py-0.2 rounded-full text-[9px] font-extrabold ${
-                    isSelected
-                      ? 'bg-white/25 text-white'
-                      : 'bg-teal-500/15 text-teal-700 dark:text-teal-300'
-                  }`}
-                >
-                  {tab.badge}
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
+      <CalculatorWorkspaceHeader
+        lang={lang}
+        categoryFilter={categoryFilter}
+        onCategoryChange={setCategoryFilter}
+        activeTab={activeTab}
+        onTabChange={id => setActiveTab(id as CalculatorTabId)}
+        tabs={calculatorTabs}
+        onPrint={handlePrintCurrentCalculations}
+      />
 
       {/* =====================================================================
           TAB A: PEDIATRIC DRUG DOSING CALCULATOR (mg/kg & Suspension mL)
