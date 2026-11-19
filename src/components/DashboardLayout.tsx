@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { lazy, Suspense, useState, useEffect } from 'react';
 import { Patient, PatientStatus, Language, ClinicalIntervention, ReconciliationDiscrepancy, Medication, LabResult } from '../types/clinical';
 import { translations } from '../lib/i18n';
 import {
@@ -27,22 +27,13 @@ import {
   Share2,
   Crown
 } from 'lucide-react';
-import { ReconciliationPanel } from './workspace/ReconciliationPanel';
-import { CalculatorsPanel } from './workspace/CalculatorsPanel';
-import { AlertsPanel } from './workspace/AlertsPanel';
-import { DocumentationPanel } from './workspace/DocumentationPanel';
-import { GuidelinesPanel } from './workspace/GuidelinesPanel';
-import { TrainingPanel } from './workspace/TrainingPanel';
-import { UsersAdminPanel } from './workspace/UsersAdminPanel';
 import { PatientWorkspaceHeader } from './workspace/PatientWorkspaceHeader';
 import { PatientCard } from './workspace/PatientCard';
-import { CopilotDialog } from './CopilotDialog';
-import { PatientDetailsModal } from './PatientDetailsModal';
 import { NewPatientModal } from './NewPatientModal';
 import { GitHubReleaseModal } from './GitHubReleaseModal';
 import { AndroidPermissionsModal } from './AndroidPermissionsModal';
 import { calculateCrCl, analyzePatientSafety } from '../lib/clinical-engine';
-import { resolveLocalReference, exportLocalReferenceMarkdown } from '../lib/clinicalReferences';
+import type { ResolvedLocalReference } from '../lib/clinicalReferences';
 import { printOrSaveClinicalPdf, shareClinicalFile } from '../lib/androidPermissions';
 import { syncQueue } from '../lib/supabase/syncQueue';
 import { authService } from '../lib/supabase/auth';
@@ -57,8 +48,29 @@ import { GlobalHeader } from './navigation/GlobalHeader';
 import { MobileBottomNavigation } from './navigation/MobileBottomNavigation';
 import { MobileNavigationDrawer } from './navigation/MobileNavigationDrawer';
 import { PrimarySidebar } from './navigation/PrimarySidebar';
-import { ClinicalEncyclopediaPage } from './clinical-encyclopedia/ClinicalEncyclopediaPage';
 import { ClinicalEmptyState } from './ui/clinical';
+
+const ReconciliationPanel = lazy(() => import('./workspace/ReconciliationPanel').then(m => ({ default: m.ReconciliationPanel })));
+const CalculatorsPanel = lazy(() => import('./workspace/CalculatorsPanel').then(m => ({ default: m.CalculatorsPanel })));
+const AlertsPanel = lazy(() => import('./workspace/AlertsPanel').then(m => ({ default: m.AlertsPanel })));
+const DocumentationPanel = lazy(() => import('./workspace/DocumentationPanel').then(m => ({ default: m.DocumentationPanel })));
+const GuidelinesPanel = lazy(() => import('./workspace/GuidelinesPanel').then(m => ({ default: m.GuidelinesPanel })));
+const TrainingPanel = lazy(() => import('./workspace/TrainingPanel').then(m => ({ default: m.TrainingPanel })));
+const UsersAdminPanel = lazy(() => import('./workspace/UsersAdminPanel').then(m => ({ default: m.UsersAdminPanel })));
+const ClinicalEncyclopediaPage = lazy(() => import('./clinical-encyclopedia/ClinicalEncyclopediaPage').then(m => ({ default: m.ClinicalEncyclopediaPage })));
+const CopilotDialog = lazy(() => import('./CopilotDialog').then(m => ({ default: m.CopilotDialog })));
+const PatientDetailsModal = lazy(() => import('./PatientDetailsModal').then(m => ({ default: m.PatientDetailsModal })));
+
+function WorkspaceLoading({ lang }: { lang: Language }) {
+  return (
+    <div className="flex min-h-48 items-center justify-center rounded-clinical border border-clinical-border bg-clinical-surface p-6 text-sm text-clinical-muted" role="status" aria-live="polite">
+      <span className="inline-flex items-center gap-2">
+        <span className="size-4 animate-spin rounded-full border-2 border-clinical-border border-t-clinical-teal" aria-hidden="true" />
+        {lang === 'ar' ? 'جاري تجهيز المساحة السريرية…' : 'Loading clinical workspace…'}
+      </span>
+    </div>
+  );
+}
 
 interface Props {
   patients: Patient[];
@@ -117,13 +129,19 @@ export function DashboardLayout({
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const [auditNotice, setAuditNotice] = useState<string | null>(null);
   const [activeLocalRefUri, setActiveLocalRefUri] = useState<string | null>(null);
+  const [resolvedLocalRef, setResolvedLocalRef] = useState<ResolvedLocalReference | null>(null);
   const [guidelinesTargetUri, setGuidelinesTargetUri] = useState<string | null>(null);
 
-  const handleOpenLocalReference = (uri: string) => {
+  const handleOpenLocalReference = async (uri: string) => {
     setActiveLocalRefUri(uri);
+    const { resolveLocalReference } = await import('../lib/clinicalReferences');
+    setResolvedLocalRef(resolveLocalReference(uri));
   };
 
-  const resolvedLocalRef = activeLocalRefUri ? resolveLocalReference(activeLocalRefUri) : null;
+  const closeLocalReference = () => {
+    setActiveLocalRefUri(null);
+    setResolvedLocalRef(null);
+  };
 
   const t = translations[lang];
 
@@ -344,6 +362,7 @@ export function DashboardLayout({
           />
         }
       >
+      <Suspense fallback={<WorkspaceLoading lang={lang} />}>
       {activeTab === 'encyclopedia' ? (
         <ClinicalEncyclopediaPage lang={lang} onOpenReference={handleOpenLocalReference} />
       ) : (
@@ -566,6 +585,7 @@ export function DashboardLayout({
         {activeTab === 'users_admin' && <UsersAdminPanel lang={lang} />}
       </div>
       )}
+      </Suspense>
       </ClinicalAppShell>
 
       {/* Floating Copilot Trigger Button (Positioned above Android bottom nav on mobile) */}
@@ -583,7 +603,7 @@ export function DashboardLayout({
       </div>
 
       {/* Copilot Dialog */}
-      <CopilotDialog
+      <Suspense fallback={null}>{isCopilotOpen && <CopilotDialog
         isOpen={isCopilotOpen}
         onClose={() => setIsCopilotOpen(false)}
         lang={lang}
@@ -594,10 +614,10 @@ export function DashboardLayout({
         initialPrompt={copilotPrompt}
         onClearInitialPrompt={() => setCopilotPrompt(null)}
         onOpenLocalReference={handleOpenLocalReference}
-      />
+      />}</Suspense>
 
       {/* Patient Details Modal */}
-      <PatientDetailsModal
+      <Suspense fallback={null}>{selectedPatient && <PatientDetailsModal
         patient={selectedPatient ? patients.find(p => p.id === selectedPatient.id) || selectedPatient : null}
         isOpen={!!selectedPatient}
         onClose={() => setSelectedPatient(null)}
@@ -607,7 +627,7 @@ export function DashboardLayout({
         onAddIntervention={onAddIntervention}
         onOpenInterventionModal={handleOpenInterventionModal}
         onOpenLocalReference={handleOpenLocalReference}
-      />
+      />}</Suspense>
 
       {/* New Patient Admission Modal */}
       <NewPatientModal
@@ -649,7 +669,7 @@ export function DashboardLayout({
                 </div>
                 <button
                   type="button"
-                  onClick={() => setActiveLocalRefUri(null)}
+                  onClick={closeLocalReference}
                   className="min-h-[38px] min-w-[38px] flex items-center justify-center rounded-xl bg-white/10 hover:bg-white/20 text-white transition shrink-0 cursor-pointer"
                 >
                   <X className="w-5 h-5" />
@@ -664,7 +684,7 @@ export function DashboardLayout({
                   </span>
                   <button
                     type="button"
-                    onClick={() => setActiveLocalRefUri(resolvedLocalRef.chapter.sourceUrl)}
+                    onClick={() => void handleOpenLocalReference(resolvedLocalRef.chapter.sourceUrl)}
                     className="px-2.5 py-1 rounded-lg text-[11px] font-bold whitespace-nowrap bg-teal-500 text-slate-950 transition cursor-pointer"
                   >
                     {lang === 'ar' ? resolvedLocalRef.chapter.categoryAr : resolvedLocalRef.chapter.category} ({resolvedLocalRef.chapter.pages})
@@ -673,7 +693,7 @@ export function DashboardLayout({
                     <button
                       key={ch.id}
                       type="button"
-                      onClick={() => setActiveLocalRefUri(ch.sourceUrl)}
+                      onClick={() => void handleOpenLocalReference(ch.sourceUrl)}
                       className="px-2.5 py-1 rounded-lg text-[11px] font-bold whitespace-nowrap bg-white/10 text-slate-200 hover:bg-white/20 transition cursor-pointer"
                     >
                       {lang === 'ar' ? ch.categoryAr : ch.category} ({ch.pages})
@@ -834,7 +854,7 @@ export function DashboardLayout({
                   onClick={() => {
                     const target = resolvedLocalRef.verbatimChapterId || resolvedLocalRef.chapter.sourceUrl;
                     setGuidelinesTargetUri(target);
-                    setActiveLocalRefUri(null);
+                    closeLocalReference();
                     setSelectedPatient(null);
                     setIsCopilotOpen(false);
                     setActiveTab('guidelines');
@@ -850,7 +870,8 @@ export function DashboardLayout({
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
+                  onClick={async () => {
+                    const { exportLocalReferenceMarkdown } = await import('../lib/clinicalReferences');
                     const md = exportLocalReferenceMarkdown(resolvedLocalRef.chapter, lang);
                     printOrSaveClinicalPdf({
                       title: lang === 'ar' ? resolvedLocalRef.chapter.titleAr : resolvedLocalRef.chapter.title,
@@ -867,7 +888,8 @@ export function DashboardLayout({
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
+                  onClick={async () => {
+                    const { exportLocalReferenceMarkdown } = await import('../lib/clinicalReferences');
                     const md = exportLocalReferenceMarkdown(resolvedLocalRef.chapter, lang);
                     void shareClinicalFile({
                       filename: `clinpharm-local-ref-${resolvedLocalRef.chapter.id}.md`,
@@ -884,7 +906,7 @@ export function DashboardLayout({
                   type="button"
                   onClick={() => {
                     const title = lang === 'ar' ? resolvedLocalRef.chapter.titleAr : resolvedLocalRef.chapter.title;
-                    setActiveLocalRefUri(null);
+                    closeLocalReference();
                     setCopilotPrompt(
                       lang === 'ar'
                         ? `لخص لي أهم القواعد العلاجية وتعديلات الجرعات من الفصل المحلي: ${title}`
@@ -900,7 +922,7 @@ export function DashboardLayout({
               </div>
               <button
                 type="button"
-                onClick={() => setActiveLocalRefUri(null)}
+                onClick={closeLocalReference}
                 className="min-h-[40px] px-4 py-2 rounded-xl bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-bold hover:bg-slate-300 transition cursor-pointer"
               >
                 {lang === 'ar' ? 'إغلاق' : 'Close'}

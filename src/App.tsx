@@ -18,7 +18,6 @@ import {
   getSyncedFullBooksSync,
   hydrateSyncedFullBooks
 } from './lib/googleDrive/fullBookIdb';
-import { syncAllServerPreindexedBooks } from './lib/googleDrive/fullBookEngine';
 
 const STORAGE_KEYS = {
   PATIENTS: 'clinpharm_patients_v2',
@@ -177,6 +176,7 @@ export default function App() {
             !stockley ||
             (stockley.chapters?.[0]?.sections?.[0]?.body?.trim()?.length || 0) < 80;
           if (needsRefresh) {
+            const { syncAllServerPreindexedBooks } = await import('./lib/googleDrive/fullBookEngine');
             await syncAllServerPreindexedBooks(undefined, { forceReload: true });
           }
         } catch {
