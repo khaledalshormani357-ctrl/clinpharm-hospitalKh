@@ -158,12 +158,13 @@ describe('Phase 3 Clinical Knowledge Graph Prototype — DKA & Heart Failure', (
     }
   });
 
-  it('4. Treats the 20 sections as non-mandatory and marks undocumented sections honestly without synthetic filler', () => {
+  it('4. Keeps epidemiology honest while exposing the documented DKA risk-factor content', () => {
     const dkaEpiPayload = getLazySectionPayload('topic-dka', 'epidemiology_risk_factors');
     expect(dkaEpiPayload).toBeDefined();
-    expect(dkaEpiPayload!.section.availabilityStatus).toBe('not_documented_in_current_sources');
-    expect(dkaEpiPayload!.statements.length).toBe(0);
-    expect(dkaEpiPayload!.section.availabilityNoteEn).toContain('not separately tabulated');
+    expect(dkaEpiPayload!.section.availabilityStatus).toBe('populated');
+    expect(dkaEpiPayload!.statements.length).toBe(1);
+    expect(dkaEpiPayload!.statements[0].statementTextEn).toContain('acute stressor');
+    expect(dkaEpiPayload!.section.availabilityNoteEn).toContain('do not provide a single population-level incidence');
   });
 
   it('5. Deduplicates multi-source statements with identical fingerprints while preserving conflicting evidence separately', () => {

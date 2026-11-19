@@ -78,13 +78,13 @@ export const DKA_CLINICAL_TOPIC: ClinicalTopic = {
       sectionOrder: 2,
       titleEn: '2. Epidemiology & Risk Factors',
       titleAr: '2. الوبائيات وعوامل الخطورة',
-      availabilityStatus: 'not_documented_in_current_sources',
+      availabilityStatus: 'populated',
       availabilityNoteEn:
-        'Population-level epidemiological incidence/prevalence statistics for DKA are not separately tabulated in the currently indexed chapters (ACCP Vol 2 Ch. 8/15 & DiPiro Ch. 83 focus directly on pathophysiology, precipitants, diagnostic thresholds, and resuscitation protocols). Precipitating risk factors (SGLT2 inhibitors, pregnancy, surgical fasting) are documented in Section 4.',
+        'The indexed sources document clinically actionable risk factors and high-risk contexts but do not provide a single population-level incidence or prevalence estimate. Do not infer an epidemiological rate from this monograph; use local surveillance data when reporting incidence.',
       availabilityNoteAr:
-        'لا تتضمن الفصول المفهرسة حالياً (ACCP Vol 2 الفصل 8/15 وDiPiro الفصل 83) إحصاءات وبائية سكانية منفصلة لـ DKA، بل تركز مباشرةً على الفيزيولوجيا المرضية والمحفزات ومعايير التشخيص وبروتوكولات الإنعاش. راجع القسم 4 للعوامل المحفزة الموثقة.',
-      populatedStatementCount: 0,
-      sourceIds: []
+        'توثق المصادر المفهرسة عوامل الخطورة والسياقات السريرية عالية الخطورة، لكنها لا تقدم تقديراً سكانياً موحداً لمعدل الحدوث أو الانتشار. لا تستنتج معدلًا وبائيًا من هذه الموسوعة؛ استخدم بيانات الترصد المحلية عند الإبلاغ عن معدل الحدوث.',
+      populatedStatementCount: 1,
+      sourceIds: ['accp-2026-vol2', 'dipiro-13th-ed']
     },
     {
       id: 'topic-dka:pathophysiology',
@@ -517,6 +517,72 @@ export const DKA_KNOWLEDGE_STATEMENTS: KnowledgeStatement[] = [
         verbatimExcerpt:
           'Diabetic Ketoacidosis (DKA) is characterized by the triad of hyperglycemia (BG >200–250 mg/dL, or euglycemic in SGLT2i-associated DKA), high-anion-gap metabolic acidosis (arterial pH <7.30, serum HCO3- <18 mEq/L, Anion Gap >12 mEq/L), and ketonemia (beta-hydroxybutyrate >=3.0 mmol/L).',
         sourceLocationUri: 'local://ref/verbatim/dipiro-13th-ed/dipiro-ch83-endocrine-dka/dipiro-endo-sec1',
+        citationRole: 'corroborating_source',
+        extractionMethod: 'curated_monograph'
+      }
+    ]
+  },
+  // Section 2: epidemiology_risk_factors
+  {
+    id: 'stmt-dka-epi-1',
+    topicId: 'topic-dka',
+    sectionId: 'topic-dka:epidemiology_risk_factors',
+    sectionKey: 'epidemiology_risk_factors',
+    statementOrder: 1,
+    verbatimSourceText:
+      'The indexed DKA chapters identify SGLT2 inhibitor exposure, acute medical illness, prolonged fasting, major surgery, and pregnancy as high-risk contexts for euglycemic or otherwise precipitated DKA. Population-level incidence and prevalence are not tabulated in these chapters and must not be fabricated from protocol data.',
+    statementTextEn:
+      'Risk is concentrated in patients with insulin deficiency or diabetes who develop an acute stressor, including infection or other acute illness, prolonged fasting, major surgery, pregnancy, or exposure to an SGLT2 inhibitor. SGLT2 inhibitors are particularly important because renal glycosuria can mask hyperglycemia and delay recognition of euglycemic DKA. The indexed chapters do not provide a single incidence or prevalence estimate; local surveillance data are required for epidemiological reporting.',
+    statementTextAr:
+      'يرتفع الخطر لدى مرضى السكري أو عوز الإنسولين عند حدوث محفز حاد، مثل العدوى أو المرض الحاد، الصيام المطول، الجراحة الكبرى، الحمل، أو استخدام مثبطات SGLT2. وتكتسب مثبطات SGLT2 أهمية خاصة لأن البيلة السكرية الكلوية قد تخفي فرط سكر الدم وتؤخر اكتشاف الحماض الكيتوني سوي السكر. لا تقدم الفصول المفهرسة تقديراً موحداً لمعدل الحدوث أو الانتشار؛ لذلك يلزم استخدام بيانات الترصد المحلية عند إعداد تقرير وبائي.',
+    clinicianReviewedNoteEn:
+      'This section deliberately distinguishes documented clinical risk factors from epidemiological rates that are not available in the indexed chapters.',
+    clinicianReviewedNoteAr:
+      'يميز هذا القسم عمداً بين عوامل الخطورة السريرية الموثقة ومعدلات الحدوث الوبائية غير المتاحة في الفصول المفهرسة.',
+    reviewedBySpecialist: 'Dr. Khaled Al-Shormani, Clinical Pharmacist',
+    reviewedAt: '2026-11-20T00:00:00Z',
+    generationMethod: 'verbatim_extraction',
+    statementType: 'epidemiology_fact',
+    population: 'adults',
+    recommendationStrength: 'Clinical Risk Stratification',
+    evidenceLevel: 'ADA Standards of Care 2026',
+    certainty: 'high',
+    verificationStatus: 'verified_multi_source',
+    normalizedFingerprint: 'dka-risk-factors-acute-illness-fasting-surgery-pregnancy-sglt2-no-incidence-rate',
+    citations: [
+      {
+        id: 'cit-dka-epi-1a',
+        knowledgeStatementId: 'stmt-dka-epi-1',
+        sourceId: 'accp-2026-vol2',
+        monographChapterId: 'accp-v2-cirrhosis-dka',
+        monographSectionId: 'accp-he-sec8',
+        edition: '2026 Edition',
+        publicationYear: 2026,
+        chapterNumber: 8,
+        chapterTitle: 'Gastroenterology, Hepatology & Endocrinology: DKA Protocol',
+        sectionReference: 'Section 8.0: Euglycemic DKA (euDKA) and SGLT2 Inhibitor Pitfalls',
+        pageRange: 'pp. 295–368',
+        verbatimExcerpt:
+          'SGLT2 inhibitors can precipitate euglycemic DKA; hold them during acute medical illness, prolonged fasting, or before major surgery.',
+        sourceLocationUri: 'local://ref/verbatim/accp-2026-vol2/accp-v2-cirrhosis-dka/accp-he-sec8',
+        citationRole: 'primary_source',
+        extractionMethod: 'curated_monograph'
+      },
+      {
+        id: 'cit-dka-epi-1b',
+        knowledgeStatementId: 'stmt-dka-epi-1',
+        sourceId: 'dipiro-13th-ed',
+        monographChapterId: 'dipiro-ch83-endocrine-dka',
+        monographSectionId: 'dipiro-endo-sec2',
+        edition: '13th Edition (2026)',
+        publicationYear: 2026,
+        chapterNumber: 83,
+        chapterTitle: 'Endocrine Disorders: Diabetic Ketoacidosis (DKA)',
+        sectionReference: 'Section 6.2: Inpatient Glycemic Targets & Oral Antidiabetic Hold Rules',
+        pageRange: 'pp. 1190–1255',
+        verbatimExcerpt:
+          'Hold SGLT2 inhibitors during acute illness, prolonged fasting, or 3–4 days prior to scheduled surgery because of euglycemic DKA risk.',
+        sourceLocationUri: 'local://ref/verbatim/dipiro-13th-ed/dipiro-ch83-endocrine-dka/dipiro-endo-sec2',
         citationRole: 'corroborating_source',
         extractionMethod: 'curated_monograph'
       }
